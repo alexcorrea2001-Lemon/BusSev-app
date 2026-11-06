@@ -1,0 +1,134 @@
+# Compila el APK de BusSev.
+# - Cada vez que subes cambios, o a mano: pestaña Actions → "Compilar APK" → Run workflow.
+# - Además, el día 1 de cada mes revisa si TUSSAM ha publicado horarios nuevos y,
+#   si los hay, compila una versión nueva sola.
+# El APK aparece en la pestaña Releases del repositorio.
+name: Compilar APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 1 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Número de versión: el contador de GitHub + 100 (al pasar a un repositorio nuevo, el contador
+      # vuelve a 1 y Android no deja instalar un número menor encima del que ya tienes)
+      - name: Número de versión
+        run: echo "NUMERO=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Horarios oficiales de TUSSAM (paradas, líneas y recorridos). Si falla, se usan los que ya hay.
+      - name: Actualizar paradas y recorridos (datos oficiales)
+        continue-on-error: true
+        timeout-minutes: 8
+        env:
+          NAP_API_KEY: ${{ secrets.NAP_API_KEY }}
+        run: bash scripts/actualizar_datos.sh
+
+      - name: Guardar los datos nuevos en el repositorio
+        id: datos
+        run: |
+          if git diff --quiet -- www/data.js; then
+            echo "cambio=no" >> "$GITHUB_OUTPUT"
+            echo "Los datos ya estaban al día."
+          else
+            echo "cambio=si" >> "$GITHUB_OUTPUT"
+            git config user.name "BusSev (automático)"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add www/data.js
+            git commit -m "Datos oficiales de TUSSAM actualizados"
+            git push || echo "No se han podido guardar en el repositorio (no pasa nada: van igual en el APK)."
+          fi
+
+      # En la revisión mensual, si no hay nada nuevo, no se compila (no se llena Releases de copias)
+      - name: ¿Hace falta compilar?
+        id: seguir
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "${{ steps.datos.outputs.cambio }}" = "no" ]; then
+            echo "si=no" >> "$GITHUB_OUTPUT"; echo "Revisión mensual: sin cambios, no se compila."
+          else
+            echo "si=si" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Instalar Capacitor
+        if: steps.seguir.outputs.si == 'si'
+        run: npm ci
+
+      # Recorridos por calle: es un extra. Si el servidor de mapas falla o tarda,
+      # NO se detiene la compilación; la app usa líneas rectas entre paradas.
+      - name: Calcular recorridos por calle (opcional)
+        if: steps.seguir.outputs.si == 'si'
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          node scripts/recorridos.mjs || echo "Recorridos omitidos; la app usara lineas rectas."
+
+      # Número de versión dentro de la app (para el botón «Buscar actualización» de Ajustes)
+      - name: Apuntar la versión
+        if: steps.seguir.outputs.si == 'si'
+        run: |
+          printf '/* Lo escribe GitHub al compilar. */\nwindow.BUSSEV_VERSION = { build: %s, fecha: "%s", repo: "%s" };\n' \
+            "$NUMERO" "$(date -u +%Y-%m-%d)" "${{ github.repository }}" > www/version.js
+          cat www/version.js
+
+      - name: Copiar la app al proyecto Android
+        if: steps.seguir.outputs.si == 'si'
+        run: npx cap sync android
+
+      # La clave de firma vive en los «Secrets» del repositorio (nunca en el código ni en los registros)
+      - name: Preparar la firma
+        if: steps.seguir.outputs.si == 'si'
+        env:
+          CLAVE: ${{ secrets.BUSSEV_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$CLAVE" ]; then
+            echo "::error::Falta el secreto BUSSEV_KEYSTORE_BASE64 (Settings → Secrets and variables → Actions). Mira el README."
+            exit 1
+          fi
+          echo "$CLAVE" | base64 -d > "$RUNNER_TEMP/bussev.keystore"
+          echo "BUSSEV_KEYSTORE=$RUNNER_TEMP/bussev.keystore" >> "$GITHUB_ENV"
+
+      - name: Compilar
+        if: steps.seguir.outputs.si == 'si'
+        working-directory: android
+        env:
+          BUSSEV_KEYSTORE_PASSWORD: ${{ secrets.BUSSEV_KEYSTORE_PASSWORD }}
+          BUSSEV_KEY_ALIAS: ${{ secrets.BUSSEV_KEY_ALIAS }}
+          BUSSEV_KEY_PASSWORD: ${{ secrets.BUSSEV_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace -PbussevVersionCode=$NUMERO
+          rm -f "$RUNNER_TEMP/bussev.keystore"
+
+      - name: Renombrar APK
+        if: steps.seguir.outputs.si == 'si'
+        run: cp android/app/build/outputs/apk/release/app-release.apk BusSev.apk
+
+      - name: Publicar en Releases
+        if: steps.seguir.outputs.si == 'si'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.NUMERO }}
+          name: BusSev ${{ env.NUMERO }}
+          body: |
+            Descarga **BusSev.apk** desde el móvil y ábrelo para instalarlo (se instala encima, sin perder nada).
+            ${{ steps.datos.outputs.cambio == 'si' && 'Incluye los horarios y recorridos oficiales más recientes de TUSSAM.' || '' }}
+          files: BusSev.apk
