@@ -4,7 +4,6 @@
 // Antes coloca cada parada en su sitio exacto según OpenStreetMap (paradas_osm.mjs).
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { paradasOSM } from './paradas_osm.mjs';
 
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -20,6 +19,7 @@ const paradas = new Map(D.paradas.map((p) => [p.codigo, p]));
 let osm = new Map();
 if (!process.env.BUSSEV_SOLO_FUNCIONES) {
   try {
+    const { paradasOSM } = await import('./paradas_osm.mjs');   // si falta el archivo, se sigue sin él
     const r = await paradasOSM(D.paradas);
     osm = r.ajustes;
     console.log(`OpenStreetMap: ${r.nodos} paradas de bus en la zona; colocadas ${r.porNumero} por número y ${r.porNombre} por nombre (de ${D.paradas.length}).`);
@@ -57,21 +57,32 @@ const puntosDe = (legs) => legs.map((leg) => {
 /* 1) «Ajuste al trazado» (map matching): OSRM mira, para cada parada, todas las calles a menos de
    35 m y elige la combinación que forma el recorrido más lógico. Así no se pega una parada a la
    calzada del otro sentido de una avenida (lo que provocaba vueltas a la manzana que el bus no da). */
+let avisoAjuste = 0, sinRadios = false;   // si el servidor rechaza los márgenes una vez, ya no se mandan
 async function porAjuste(stops) {
   const coords = stops.map((s) => `${s.lon.toFixed(6)},${s.lat.toFixed(6)}`).join(';');
-  const radios = stops.map(() => 35).join(';');
-  const url = `${OSRM}/match/v1/driving/${coords}?overview=false&steps=true&geometries=geojson&gaps=ignore&tidy=false&radiuses=${radios}`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'BusSev (app personal)' }, signal: AbortSignal.timeout(12000) });
-  if (!res.ok) throw new Error(`OSRM match ${res.status}`);
-  const j = await res.json();
-  // Solo vale si ha encajado TODAS las paradas en un único recorrido continuo
-  if (j.code !== 'Ok' || j.matchings?.length !== 1 || !j.tracepoints?.every(Boolean)) throw new Error(j.code !== 'Ok' ? `OSRM match ${j.code}` : 'no encajan todas las paradas');
-  const legs = j.matchings[0].legs;
-  if (legs.length !== stops.length - 1) throw new Error('OSRM match: tramos incompletos');
-  return puntosDe(legs);
+  let ultimo;
+  // 1º con margen de 25 m por parada; si el servidor no lo admite (400), sin indicar margen (usa el suyo)
+  for (const extra of sinRadios ? [''] : [`&radiuses=${stops.map(() => 25).join(';')}`, '']) {
+    const url = `${OSRM}/match/v1/driving/${coords}?overview=false&steps=true&geometries=geojson&gaps=ignore&tidy=false${extra}`;
+    const res = await fetch(url, { headers: { 'User-Agent': 'BusSev (app personal)' }, signal: AbortSignal.timeout(12000) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      ultimo = new Error(`OSRM match ${res.status}${j.code ? ` ${j.code}` : ''}${j.message ? `: ${j.message}` : ''}`);
+      if (avisoAjuste++ < 3) process.stdout.write(`   (detalle: ${ultimo.message})\n`);
+      if (res.status === 400 && extra) { sinRadios = true; await esperar(PAUSA_MS); continue; }
+      throw ultimo;
+    }
+    // Solo vale si ha encajado TODAS las paradas en un único recorrido continuo
+    if (j.code !== 'Ok' || j.matchings?.length !== 1 || !j.tracepoints?.every(Boolean)) throw new Error(j.code !== 'Ok' ? `OSRM match ${j.code}` : 'no encajan todas las paradas');
+    const legs = j.matchings[0].legs;
+    if (legs.length !== stops.length - 1) throw new Error('OSRM match: tramos incompletos');
+    return puntosDe(legs);
+  }
+  throw ultimo;
 }
-/* 2) Si el ajuste no sale, ruta normal parada a parada, llegando por el lado de la acera (derecha) */
-async function porRuta(stops, acera = true) {
+/* 2) Si el ajuste no sale, ruta normal parada a parada (con «acera» obliga a llegar por la derecha: solo como
+   alternativa, porque si la parada está mal colocada provoca vueltas a la manzana) */
+async function porRuta(stops, acera = false) {
   const coords = stops.map((s) => `${s.lon.toFixed(6)},${s.lat.toFixed(6)}`).join(';');
   const lados = acera ? `&approaches=${stops.map(() => 'curb').join(';')}` : '';
   const url = `${OSRM}/route/v1/driving/${coords}?overview=false&steps=true&geometries=geojson&continue_straight=true${lados}`;
@@ -123,7 +134,7 @@ let ok = 0, rectos = 0;
 if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
   const stops = lista.sort((a, b) => a.orden - b.orden);
   if (stops.length < 2) continue;
-  if (!quedaTiempo(8.5)) { process.stdout.write(`… sin tiempo: ${k} queda en línea recta\n`); continue; }
+  if (!quedaTiempo(7)) { process.stdout.write(`… sin tiempo: ${k} queda en línea recta\n`); continue; }
   try {
     const legs = [];
     for (let i = 0; i < stops.length - 1; i += MAX_WAYPOINTS - 1) {
@@ -143,8 +154,8 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
       const a = [stops[i].lat, stops[i].lon], b = [stops[i + 1].lat, stops[i + 1].lon];
       if (!tramoRaro(legs[i], a, b)) { recto.push(false); continue; }
       const opciones = [legs[i]];
-      for (const acera of [true, false]) {
-        if (rehechos >= MAX_REHECHOS || !quedaTiempo(7)) break;
+      for (const acera of [false, true]) {
+        if (rehechos >= MAX_REHECHOS || !quedaTiempo(5.5)) break;
         rehechos++;
         try {
           await esperar(PAUSA_MS);
@@ -166,9 +177,11 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
       if (i > 0 && !recto[i - 1]) cand.push(legs[i - 1].pts[legs[i - 1].pts.length - 1]);
       if (i < legs.length && !recto[i]) cand.push(legs[i].pts[0]);
       const q = cand.find((c) => c && hav(raw, c) <= 60);
-      // La línea pasa siempre por la calzada; el punto de la parada se dibuja donde diga OpenStreetMap (en la acera)
-      if (osm.has(stops[i].codigo)) return q || raw;
-      if (!q) return raw;
+      const qLinea = cand.find((c) => c && hav(raw, c) <= 150);
+      // La línea pasa siempre por la calzada (aunque la parada esté algo lejos);
+      // el punto de la parada se dibuja donde diga OpenStreetMap (en la acera)
+      if (osm.has(stops[i].codigo)) return qLinea || raw;
+      if (!q) return qLinea || raw;
       const dist = hav(raw, q);
       const prev = ajustes.get(stops[i].codigo);
       if (dist > 3 && (!prev || dist < prev.dist)) ajustes.set(stops[i].codigo, { dist, pos: q });
