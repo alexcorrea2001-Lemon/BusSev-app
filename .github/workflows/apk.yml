@@ -87,9 +87,25 @@ jobs:
       - name: Calcular recorridos por calle (opcional)
         if: steps.seguir.outputs.si == 'si'
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 12
         run: |
           node scripts/recorridos.mjs || echo "Recorridos omitidos; la app usara lineas rectas."
+
+      # Los recorridos se guardan en el repositorio: la próxima vez, si los datos no han cambiado,
+      # no se vuelven a calcular (compila en unos minutos menos y no se carga a los servidores de mapas)
+      - name: Guardar los recorridos en el repositorio
+        if: steps.seguir.outputs.si == 'si'
+        continue-on-error: true
+        run: |
+          if git diff --quiet -- www/recorridos.js; then
+            echo "Recorridos sin cambios."
+          else
+            git config user.name "BusSev (automático)"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add www/recorridos.js
+            git commit -m "Recorridos por calle actualizados"
+            git push || echo "No se han podido guardar (no pasa nada: van igual en el APK)."
+          fi
 
       # Número de versión dentro de la app (para el botón «Buscar actualización» de Ajustes)
       - name: Apuntar la versión
