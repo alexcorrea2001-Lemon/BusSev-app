@@ -1,0 +1,25 @@
+{
+  "appId": "es.bussev.app",
+  "appName": "BusSev",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#111214",
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_bus",
+      "iconColor": "#D41C2B"
+    }
+  },
+  "loggingBehavior": "none"
+}
