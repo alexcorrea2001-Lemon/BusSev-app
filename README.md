@@ -197,6 +197,13 @@ Al compilar, GitHub apunta el número de versión en `www/version.js`. La app pr
 versión publicada. Si el repositorio es **privado**, GitHub no deja mirarlo sin entrar: la app abre la página de versiones
 para que entres con tu cuenta.
 
+### Créditos
+- La forma de pedir y leer los tiempos de llegada (y las rutas internas `/paradas/…/tiempos`, `/cercanas`…) está basada en
+  la **[API TUSSAM](https://github.com/686f6c61/API-TUSSAM)** de 686f6c61, publicada con licencia
+  [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) (Copyright (c) 2026 686f6c61).
+  Por eso BusSev también es **solo para uso no comercial**. BusSev no usa su servidor: pregunta a TUSSAM desde el móvil.
+- Horarios, paradas y recorridos: GTFS oficial de TUSSAM (Punto de Acceso Nacional). Mapa: OpenFreeMap / OpenStreetMap.
+
 ### Aviso legal
 Uso **personal y no comercial**. Proyecto independiente, sin relación con TUSSAM. Los servicios de TUSSAM no son
 públicos ni están documentados: si cambian, alguna función puede dejar de ir hasta que se ajuste la app.

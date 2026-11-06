@@ -20,7 +20,7 @@ for (const [cod, lin, sentido, orden] of D.recorridos) {
   if (!p) continue;
   const k = `${lin}|${sentido}`;
   if (!grupos.has(k)) grupos.set(k, []);
-  grupos.get(k).push({ orden, lat: p.latitud, lon: p.longitud });
+  grupos.get(k).push({ orden, codigo: cod, lat: p.latitud, lon: p.longitud });
 }
 
 const hav = (a, b) => {
@@ -79,13 +79,38 @@ async function tramos(stops) {
 /* ¿Este tramo da un rodeo que el autobús no da? (vuelta a la manzana, cambio de calzada…)
    Entre dos paradas seguidas el bus va casi recto: si el camino calculado es mucho más largo
    que la distancia en línea recta, se usa la recta. */
-export const esRodeo = (distancia, recta) => distancia > Math.max(recta * 2, recta + 350);
+export const esRodeo = (distancia, recta) => distancia > Math.max(recta * 1.8, recta + 250);
+/* Cuánto se aparta el camino de la línea recta entre las dos paradas (en metros).
+   Una vuelta a la manzana se va 100-200 m hacia un lado aunque el camino no sea muy largo. */
+function desvio(pts, a, b) {
+  const r = Math.PI / 180, kx = 111320 * Math.cos(a[0] * r), ky = 110540;
+  const P = (q) => [(q[1] - a[1]) * kx, (q[0] - a[0]) * ky];
+  const [bx, by] = P(b), L2 = bx * bx + by * by;
+  let max = 0;
+  for (const q of pts) {
+    const [x, y] = P(q);
+    const t = L2 ? Math.max(0, Math.min(1, (x * bx + y * by) / L2)) : 0;
+    max = Math.max(max, Math.hypot(x - t * bx, y - t * by));
+  }
+  return max;
+}
+export const tramoRaro = (leg, a, b) => {
+  const recta = hav(a, b);
+  return !leg.pts.length || esRodeo(leg.distancia, recta) || desvio(leg.pts, a, b) > Math.max(150, recta * 0.6);
+};
+let rehechos = 0;
+const MAX_REHECHOS = Number(process.env.OSRM_MAX_REHECHOS ?? 150);
+// GitHub corta este paso a los 10 min: se deja margen para guardar siempre lo calculado
+const INICIO = Date.now();
+const quedaTiempo = (min) => Date.now() - INICIO < min * 60_000;
 
 const salida = {};
+const ajustes = new Map();   // parada -> { dist, pos } (posición en la calle)
 let ok = 0, rectos = 0;
 if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
   const stops = lista.sort((a, b) => a.orden - b.orden);
   if (stops.length < 2) continue;
+  if (!quedaTiempo(8.5)) { process.stdout.write(`… sin tiempo: ${k} queda en línea recta\n`); continue; }
   try {
     const legs = [];
     for (let i = 0; i < stops.length - 1; i += MAX_WAYPOINTS - 1) {
@@ -93,15 +118,45 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
       legs.push(...await tramos(trozo));
       await esperar(PAUSA_MS);
     }
-    const pts = [[stops[0].lat, stops[0].lon]];
+    // Si el coche da un rodeo que el autobús no da (carriles bus, calles cortadas), ese tramo va en recta.
+    // Tramo raro (rodeo o vuelta a la manzana): se recalcula solo ese tramo llegando por el lado de la acera;
+    // si sigue raro, ese tramo va en línea recta entre las dos paradas.
+    const recto = [];
+    for (let i = 0; i < legs.length; i++) {
+      const a = [stops[i].lat, stops[i].lon], b = [stops[i + 1].lat, stops[i + 1].lon];
+      if (!tramoRaro(legs[i], a, b)) { recto.push(false); continue; }
+      let arreglado = false;
+      if (rehechos < MAX_REHECHOS && quedaTiempo(7)) {
+        rehechos++;
+        try {
+          await esperar(PAUSA_MS);
+          const [nuevo] = await porRuta([stops[i], stops[i + 1]]);
+          if (nuevo && !tramoRaro(nuevo, a, b)) { legs[i] = nuevo; arreglado = true; }
+        } catch { /* se queda en recta */ }
+      }
+      if (!arreglado) rectos++;
+      recto.push(!arreglado);
+    }
+    /* Las coordenadas de las paradas que publica TUSSAM a veces caen 20-30 m fuera de la calle (dentro de una
+       manzana). Se usa el punto de la calle por donde pasa el autobús que OSRM ha encajado para esa parada,
+       si está cerca (menos de 60 m); si no, la coordenada original. */
+    const enCalle = (i) => {
+      const raw = [stops[i].lat, stops[i].lon];
+      const cand = [];
+      if (i > 0 && !recto[i - 1]) cand.push(legs[i - 1].pts[legs[i - 1].pts.length - 1]);
+      if (i < legs.length && !recto[i]) cand.push(legs[i].pts[0]);
+      const q = cand.find((c) => c && hav(raw, c) <= 60);
+      if (!q) return raw;
+      const dist = hav(raw, q);
+      const prev = ajustes.get(stops[i].codigo);
+      if (dist > 3 && (!prev || dist < prev.dist)) ajustes.set(stops[i].codigo, { dist, pos: q });
+      return q;
+    };
+    const pts = [enCalle(0)];
     const idx = [0];
     legs.forEach((leg, i) => {
-      const a = [stops[i].lat, stops[i].lon], b = [stops[i + 1].lat, stops[i + 1].lon];
-      const recta = hav(a, b);
-      // Si el coche da un rodeo que el autobús no da (carriles bus, calles cortadas), usamos la recta.
-      const usarRecta = !leg.pts.length || esRodeo(leg.distancia, recta);
-      if (usarRecta) rectos++;
-      const tramo = usarRecta ? [b] : [...leg.pts.slice(1, -1), b];
+      const b = enCalle(i + 1);
+      const tramo = recto[i] ? [b] : [...leg.pts.slice(1, -1), b];
       for (const q of tramo) pts.push([Math.round(q[0] * 1e5), Math.round(q[1] * 1e5)].map((v) => v / 1e5));
       idx.push(pts.length - 1);
     });
@@ -122,5 +177,6 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
 }
 
 if (!process.env.BUSSEV_SOLO_FUNCIONES) fs.writeFileSync(`${ROOT}www/recorridos.js`,
-  `/* Recorridos por calle calculados con OSRM (© OpenStreetMap). ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n`);
-if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rectos} tramos en recta.`);
+  `/* Recorridos por calle calculados con OSRM (© OpenStreetMap). ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n` +
+  `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)])))};\n`);
+if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rehechos} tramos raros recalculados, ${rectos} en recta, ${ajustes.size} paradas colocadas sobre la calle.`);

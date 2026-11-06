@@ -1,10 +1,19 @@
 /* BusSev sin servidor: responde a las mismas rutas que la API TUSSAM, pero desde el móvil.
+   Basado en la API TUSSAM de 686f6c61 (https://github.com/686f6c61/API-TUSSAM): rutas y forma de leer
+   los tiempos de reddelineas.tussam.es. Licencia PolyForm Noncommercial 1.0.0
+   (https://polyformproject.org/licenses/noncommercial/1.0.0). Copyright (c) 2026 686f6c61.
    - Paradas, líneas y recorridos: los datos incluidos en la app (data.js).
    - Tiempos de llegada: se piden directamente a TUSSAM. En la app Android, Capacitor
      hace la petición de forma nativa, así que no le afecta el bloqueo CORS del navegador. */
 'use strict';
 (() => {
   const D = window.BUSSEV_DATA;
+  // Paradas colocadas sobre la calle por la que pasa el autobús (se calcula al compilar, en recorridos.js)
+  const AJ = window.BUSSEV_PARADAS_AJUSTADAS || {};
+  for (const p of D.paradas) {
+    const a = AJ[p.codigo];
+    if (Array.isArray(a) && Math.abs(a[0] - p.latitud) < 0.001 && Math.abs(a[1] - p.longitud) < 0.001) { p.latitud = a[0]; p.longitud = a[1]; }
+  }
   const ORIGEN = 'https://reddelineas.tussam.es';
   const CACHE_MS = 30_000;          // tiempos recientes que reutilizamos sin volver a preguntar
   const STALE_MS = 10 * 60_000;     // si TUSSAM falla, enseñamos lo último bueno hasta 10 min
