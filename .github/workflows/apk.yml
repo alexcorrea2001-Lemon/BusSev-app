@@ -3,6 +3,7 @@
 # - Además, el día 1 de cada mes revisa si TUSSAM ha publicado horarios nuevos y,
 #   si los hay, compila una versión nueva sola.
 # El APK aparece en la pestaña Releases del repositorio.
+# Para cambiar el nombre de la versión (v1.1.2, v1.1.3…) edita el archivo VERSION.
 name: Compilar APK
 
 on:
@@ -21,10 +22,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Número de versión: el contador de GitHub + 100 (al pasar a un repositorio nuevo, el contador
-      # vuelve a 1 y Android no deja instalar un número menor encima del que ya tienes)
+      # Versión: el NOMBRE (p. ej. 1.1.2) lo pones tú en el archivo VERSION del repositorio.
+      # El NÚMERO de compilación lo pone GitHub (su contador + 100) y siempre sube: es lo que
+      # Android usa para dejar instalar la nueva encima, aunque el nombre no cambie.
       - name: Número de versión
-        run: echo "NUMERO=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
+        run: |
+          VERSION="$(tr -d ' \r\n' < VERSION 2>/dev/null || true)"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::El archivo VERSION debe tener algo como 1.1.2 (ahora tiene: '$VERSION')"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "NUMERO=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
+          echo "Versión $VERSION, compilación $((GITHUB_RUN_NUMBER + 100))"
 
       - uses: actions/setup-node@v4
         with:
@@ -85,8 +95,8 @@ jobs:
       - name: Apuntar la versión
         if: steps.seguir.outputs.si == 'si'
         run: |
-          printf '/* Lo escribe GitHub al compilar. */\nwindow.BUSSEV_VERSION = { build: %s, fecha: "%s", repo: "%s" };\n' \
-            "$NUMERO" "$(date -u +%Y-%m-%d)" "${{ github.repository }}" > www/version.js
+          printf '/* Lo escribe GitHub al compilar. */\nwindow.BUSSEV_VERSION = { version: "%s", build: %s, fecha: "%s", repo: "%s" };\n' \
+            "$VERSION" "$NUMERO" "$(date -u +%Y-%m-%d)" "${{ github.repository }}" > www/version.js
           cat www/version.js
 
       - name: Copiar la app al proyecto Android
@@ -115,20 +125,30 @@ jobs:
           BUSSEV_KEY_PASSWORD: ${{ secrets.BUSSEV_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace -PbussevVersionCode=$NUMERO
+          ./gradlew assembleRelease --no-daemon --stacktrace -PbussevVersionCode=$NUMERO -PbussevVersionName=$VERSION
           rm -f "$RUNNER_TEMP/bussev.keystore"
 
       - name: Renombrar APK
         if: steps.seguir.outputs.si == 'si'
         run: cp android/app/build/outputs/apk/release/app-release.apk BusSev.apk
 
+      # Si ya existía esta misma versión (la has vuelto a compilar), se sustituye por la nueva
+      - name: Quitar la publicación anterior de esta misma versión
+        if: steps.seguir.outputs.si == 'si'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "v$VERSION" --cleanup-tag --yes --repo "${{ github.repository }}" || echo "Es una versión nueva."
+
       - name: Publicar en Releases
         if: steps.seguir.outputs.si == 'si'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.NUMERO }}
-          name: BusSev ${{ env.NUMERO }}
+          tag_name: v${{ env.VERSION }}
+          name: BusSev v${{ env.VERSION }}
+          make_latest: true
           body: |
             Descarga **BusSev.apk** desde el móvil y ábrelo para instalarlo (se instala encima, sin perder nada).
             ${{ steps.datos.outputs.cambio == 'si' && 'Incluye los horarios y recorridos oficiales más recientes de TUSSAM.' || '' }}
+            Compilación ${{ env.NUMERO }}.
+            <!-- bussev-build:${{ env.NUMERO }} -->
           files: BusSev.apk
