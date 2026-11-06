@@ -161,13 +161,14 @@ npx cap open android   # en Android Studio: Build → Build APK
 El servidor de recargas de TUSSAM envía su certificado HTTPS sin el intermedio de Sectigo. La app lleva ese
 certificado público (`res/raw/tussam_ca.pem`) para que la verificación sea completa; no se desactiva ninguna comprobación.
 
-### Servidor propio (opcional, recomendado)
-Hay un servidor pequeño (Deno Deploy gratis, o Google Cloud Run) que lee el saldo y, **como hace SeviBus**, da los tiempos
-de llegada: la app se los pide a él (varias paradas en una sola consulta) y es él quien pregunta a TUSSAM, guardando cada
-respuesta unos segundos. Así TUSSAM no corta por «demasiadas consultas», que con datos móviles pasa mucho porque muchísima
-gente sale a internet con la misma dirección de la operadora. Si el servidor falla, la app pregunta a TUSSAM directamente.
+### Servidor propio (opcional)
+En `servidor-saldo/` hay un servidor pequeño (Deno Deploy gratis, o Google Cloud Run) que lee el **saldo** de la tarjeta.
 Se activa en *Ajustes → Tus datos → Tu servidor*.
-Las instrucciones están en su `LEEME.txt`.
+
+También sabe pedir los tiempos de llegada, pero **normalmente TUSSAM no le deja**: su web de tiempos está protegida con
+Cloudflare y a los servidores de internet les pide una comprobación de navegador («Just a moment», error 403).
+Por eso esa opción viene desactivada y los tiempos se piden desde el móvil. El servidor tiene un diagnóstico en
+`/diag/249` que dice qué contesta TUSSAM.
 
 ### Paradas y recorridos: se actualizan solos
 Los horarios oficiales de TUSSAM (GTFS) se descargan **solos** cada vez que GitHub compila la app

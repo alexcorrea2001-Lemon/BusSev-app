@@ -14,7 +14,7 @@ const DEFAULTS = {
   theme: 'dark', color: 'rojo', refresh: 30, liveLines: true, mapStyle: 'oscuro',
   tematicaAuto: true, tematica: 'normal',
   voz: false, vozAuto: false, letraGrande: false, altoContraste: false, menosAnimaciones: false, vibrar: true, botonesGrandes: false,
-  revisarCada: 3, avisosTussam: 'mias', saldoURL: '', tiemposServidor: true, fondo: '', vehiculosFiesta: false, avisarVersion: true,
+  revisarCada: 3, avisosTussam: 'mias', saldoURL: '', tiemposServidor: false, fondo: '', vehiculosFiesta: false, avisarVersion: true,
 };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 if (!['oscuro', 'claro', 'tema'].includes(settings.mapStyle)) settings.mapStyle = 'oscuro';
@@ -172,7 +172,7 @@ const vibrar = (ms) => { if (settings.vibrar) navigator.vibrate?.(ms); };
 /* Cambia el contenido solo si ha cambiado (evita parpadeos y trabajo de más) */
 function setHTML(el, html) { if (el && el.__h !== html) { el.innerHTML = html; el.__h = html; } }
 
-const REFRESH_LINE_MIN = 45_000;
+const REFRESH_LINE_MIN = 30_000;
 const SEVILLA = [37.3891, -5.9845];
 
 /* ================================================================== */
@@ -251,6 +251,7 @@ async function api(path, { timeout, prioridad, maxEdad } = {}) {
     if (e.status === 429) throw new ApiError('TUSSAM va saturado ahora mismo. BusSev lo vuelve a intentar solo en unos segundos.', 429);
     if (e.status === 404) throw new ApiError('No se ha encontrado.', 404);
     if (e.status === 408) throw new ApiError('Hay muchas consultas en cola. Se actualizará en un momento.', 408);
+    if (e.status === 499) throw new ApiError('Cancelado', 499);
     if (e.name === 'AbortError') throw new ApiError('La conexión está tardando demasiado. Comprueba tu cobertura.');
     throw new ApiError('No hay conexión con TUSSAM. Comprueba tu conexión a internet.');
   } finally { clearTimeout(t); }
@@ -778,7 +779,7 @@ class MarkerSet {
   /* Autobuses: actualiza los que ya están (sin crearlos de nuevo).
      La posición NUNCA va hacia atrás: si el dato nuevo de TUSSAM deja al bus algo por detrás
      de donde lo habíamos dibujado, se queda quieto hasta que el avance real lo alcanza.
-     Solo si la diferencia es grande (más de 400 m, otro bus o un dato raro) se recoloca. */
+     Solo si la diferencia es enorme (más de 1,5 km, otro bus o un dato raro) se recoloca. */
   sync(buses, label, color, { parcial = false } = {}) {
     const seen = new Set();
     const now = Date.now();
@@ -793,9 +794,12 @@ class MarkerSet {
       if (!b.shape) { it.st = null; if (!nuevo) this.deslizar(it, b.pos); this.face(it, b.path?.[1], b.pos); continue; }
       const parada = b.shape.cum[b.shape.idx[b.k]];
       const real = Math.max(0, parada - distEf(b.shape, b.dist));   // metros recorridos desde el inicio de la línea
-      const v = Math.min(11, Math.max(1.4, b.dist / Math.max(45, (b.min || 0) * 60)));
+      // velocidad prudente (un poco por debajo de la que sale de TUSSAM) para no adelantarse a la realidad
+      const v = 0.8 * Math.min(10, Math.max(1.4, b.dist / Math.max(45, (b.min || 0) * 60)));
       const mismo = it.st && it.st.shape === b.shape;
-      if (!mismo || it.d == null || real < it.d - 400) it.d = real;  // primera vez o error grande: se coloca
+      // Si el dato nuevo lo deja algo por detrás, NO retrocede: se queda quieto hasta que el avance real lo alcanza.
+      // Solo si la diferencia es enorme (más de 1,5 km: otro autobús o un dato erróneo) se recoloca, deslizándolo.
+      if (!mismo || it.d == null || real < it.d - 1500) { if (it.d != null && mismo) it.largo = true; it.d = real; }
       it.st = { shape: b.shape, k: b.k, parada, base: real, t0: now, v };
       if (nuevo) { it.d = Math.max(it.d, real); this.colocar(it, false); }
       else this.colocar(it, true);
@@ -807,17 +811,19 @@ class MarkerSet {
   colocar(it, suave) {
     const st = it.st;
     if (!st) return;
-    const estimado = settings.menosAnimaciones ? st.base : st.base + st.v * (Date.now() - st.t0) / 1000;
-    it.d = Math.min(st.parada, Math.max(it.d ?? estimado, estimado));
+    // Entre datos de TUSSAM se avanza a su velocidad, pero como mucho 60 s de camino (sin datos nuevos, se para)
+    const estimado = settings.menosAnimaciones ? st.base : st.base + st.v * Math.min(60, (Date.now() - st.t0) / 1000);
+    // lo calculado no pasa de la parada desde la que se midió, y lo ya dibujado nunca va hacia atrás
+    it.d = Math.max(it.d ?? 0, Math.min(st.parada, estimado));
     const w = locateOnShape(st.shape, st.k, st.parada - it.d, true);
     if (w.fuera) return;
-    if (suave && !settings.menosAnimaciones) this.deslizar(it, w.pos); else it.mk.setLngLat(ll(w.pos));
+    if (suave && !settings.menosAnimaciones) { this.deslizar(it, w.pos, it.largo ? 1800 : 900); it.largo = false; } else it.mk.setLngLat(ll(w.pos));
     this.face(it, w.path[1], w.pos);
   }
   /* Desliza el marcador hasta el punto nuevo en menos de un segundo (en vez de saltar) */
-  deslizar(it, pos) {
+  deslizar(it, pos, dur = 900) {
     const a = it.mk.getLngLat();
-    it.anim = { de: [a.lat, a.lng], a: pos, t0: performance.now(), dur: 900 };
+    it.anim = { de: [a.lat, a.lng], a: pos, t0: performance.now(), dur };
     if (!this.raf) this.raf = requestAnimationFrame((t) => this.paso(t));
   }
   paso(t) {
@@ -919,6 +925,7 @@ const porParadaTussam = 2;  // cuántos autobuses por línea da TUSSAM en cada p
 async function liveBusesLine(linea, sentido, stops, alAvanzar, cancelado = () => false) {
   if (!stops?.length) return { buses: [], ok: 0, total: 0 };
   const shape = getShape(linea.numero, sentido, stops);
+  if (window.BusSevBackend.viaServidor) return lineaDeGolpe(linea, sentido, stops, shape, alAvanzar, cancelado);
   const best = new Map();
   const MAX_CONSULTAS = 8;
   let ok = 0, hechas = 0, limited = false, fallos = 0;
@@ -931,7 +938,7 @@ async function liveBusesLine(linea, sentido, stops, alAvanzar, cancelado = () =>
     let d;
     try { d = await api(`/paradas/${encodeURIComponent(stops[k].codigo)}/tiempos`, { prioridad: 'baja', maxEdad: 25_000 }); } catch (e) {
       if (e.status === 429) { limited = true; break; }
-      if (e.status === 408 || cancelado()) break;
+      if (e.status === 408 || e.status === 499 || cancelado()) break;
       // parada sin datos: se prueba con la anterior (dos fallos seguidos: se para)
       if (++fallos >= 2) break;
       k -= 3; continue;
@@ -957,6 +964,35 @@ async function liveBusesLine(linea, sentido, stops, alAvanzar, cancelado = () =>
     k = Math.min(masLejos.seg - 1, k - 1);
   }
   return { buses: [...best.values()], ok, total: hechas, limited, porCalle: shape.porCalle };
+}
+/* Con tu servidor (como SeviBus): la línea entera en UNA sola consulta.
+   Se pregunta por una de cada 3 paradas a la vez (el servidor lo hace por nosotros y guarda las respuestas),
+   así cada autobús se mide desde la parada que tiene justo delante: posición más exacta y sin saltos. */
+async function lineaDeGolpe(linea, sentido, stops, shape, alAvanzar, cancelado) {
+  const paso = Math.max(3, Math.ceil(stops.length / 16));
+  const ks = [];
+  for (let i = stops.length - 1; i >= 0 && ks.length < 16; i -= paso) ks.push(i);
+  const best = new Map();
+  let ok = 0, limited = false;
+  const res = await Promise.allSettled(ks.map((k) => api(`/paradas/${encodeURIComponent(stops[k].codigo)}/tiempos`, { prioridad: 'baja', maxEdad: 15_000 })));
+  if (cancelado()) return { buses: [], ok: 0, total: ks.length, cancelado: true };
+  res.forEach((r, n) => {
+    if (r.status !== 'fulfilled') { if (r.reason?.status === 429) limited = true; return; }
+    if (r.value.upstream_status === 'unavailable') return;
+    ok++;
+    const k = ks[n];
+    for (const t of r.value.tiempos || []) {
+      if (lineaFor(t.linea)?.numero !== linea.numero || (t.sentido && t.sentido !== sentido) || t.distancia_metros == null) continue;
+      const w = locateOnShape(shape, k, t.distancia_metros);
+      if (w.fuera) continue;
+      const key = t.vehiculo != null ? `v${t.vehiculo}` : `${w.seg}-${Math.round(w.pos[0] * 2000)}-${Math.round(w.pos[1] * 2000)}`;
+      const cur = best.get(key);
+      // la medida más fiable es la de la parada más cercana (menos metros por delante)
+      if (!cur || t.distancia_metros < cur.dist) best.set(key, { ...w, shape, k, dist: t.distancia_metros, min: t.tiempo_minutos, vehiculo: t.vehiculo, destino: t.destino, hacia: stops[k].nombre });
+    }
+  });
+  alAvanzar?.([...best.values()]);
+  return { buses: [...best.values()], ok, total: ks.length, limited, porCalle: shape.porCalle };
 }
 const busPopup = (b, label) => `<b>Línea ${esc(label)}</b> → ${esc(b.destino)}<br>${b.hacia ? `Llega a ${esc(b.hacia)} en ${b.min <= 0 ? 'nada' : b.min + ' min'}` : `${b.min <= 0 ? 'Llegando' : `Llega en ${b.min} min`} · a ${fmtDist(b.dist)}`}${b.vehiculo ? `<br><span class="muted">Autobús ${esc(b.vehiculo)}</span>` : ''}`;
 
@@ -999,7 +1035,7 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
     } finally { if (my === seq) spin(false); }
   }
   /* Dejar de consultar: se corta también la búsqueda que esté a medias y se para el ⟳ */
-  function parar() { stopLive?.(); stopLive = null; seq++; spin(false); }
+  function parar() { stopLive?.(); stopLive = null; seq++; spin(false); window.BusSevBackend.cancelarFondo?.(); }
   function clear() { parar(); cur = null; markers.clear(); bm.source('bs-route', fc([])); bm.source('bs-route-stops', fc([])); }
   return { show, live: () => { if (cur && settings.liveLines) return live(); }, clear, stop: parar, resume: () => { if (cur && !stopLive && settings.liveLines) { live(); stopLive = autoRefresh(live, { min: REFRESH_LINE_MIN }); } }, get current() { return cur; } };
 }
@@ -1256,7 +1292,7 @@ function zonaBuses(bm, markers, onStatus) {
   let seq = 0, parar = null, deb = 0, ultima = null;
   const ZOOM_MIN = 14.3, MAX_PARADAS = 4;
   const puede = () => settings.liveLines && !mapState.sel && !mapState.linea && location.hash === '#mapa';
-  function ocultar() { seq++; clearTimeout(deb); markers.clear(); onStatus(''); }
+  function ocultar() { seq++; clearTimeout(deb); markers.clear(); onStatus(''); window.BusSevBackend.cancelarFondo?.(); }
   function elegir(lista, centro) {
     if (!lista.length) return [];
     const d = (a, b) => (a.latitud - b[0]) ** 2 + ((a.longitud - b[1]) * 0.8) ** 2;
@@ -1308,7 +1344,7 @@ function zonaBuses(bm, markers, onStatus) {
   return {
     cargar, ocultar,
     empezar() { parar?.(); parar = autoRefresh(() => cargar(true), { min: REFRESH_LINE_MIN }); cargar(true); },
-    parar() { parar?.(); parar = null; clearTimeout(deb); seq++; },
+    parar() { parar?.(); parar = null; clearTimeout(deb); seq++; window.BusSevBackend.cancelarFondo?.(); },
   };
 }
 views.mapa = (el) => {
@@ -1731,9 +1767,9 @@ views.ajustes = (el) => {
 
       <h2 class="section-title">Tus datos</h2>
       <div class="set-group"><h3>Tu servidor: saldo y tiempos (avanzado)</h3>
-        <p>Si has montado tu propio servidor (carpeta <i>servidor-saldo</i>), pega aquí su dirección. BusSev te enseñará el saldo de la tarjeta y, como hace SeviBus, le pedirá a él los tiempos de llegada: así TUSSAM no te corta por «demasiadas consultas». Si tu servidor falla, BusSev pregunta a TUSSAM directamente. Déjalo vacío para no usarlo.</p>
+        <p>Si has montado tu propio servidor (carpeta <i>servidor-saldo</i>), pega aquí su dirección y BusSev te enseñará el saldo de la tarjeta. Déjalo vacío para no usarlo.</p>
         <div class="field"><input id="s-saldo-url" class="mini-input" style="width:100%" inputmode="url" autocomplete="off" placeholder="https://tu-servidor.deno.dev" value="${esc(settings.saldoURL || '')}"></div>
-        <div class="btn-row"><button class="btn ghost" type="button" id="s-saldo-save">Guardar</button>${settings.saldoURL ? '<button class="btn ghost" type="button" id="s-saldo-test">Probar</button>' : ''}</div>${settings.saldoURL ? sw('tiemposServidor', settings.tiemposServidor !== false, 'Pedir los tiempos a mi servidor', 'Recomendado. Si lo quitas, los tiempos se piden siempre a TUSSAM desde el móvil.') : ''}</div>
+        <div class="btn-row"><button class="btn ghost" type="button" id="s-saldo-save">Guardar</button>${settings.saldoURL ? '<button class="btn ghost" type="button" id="s-saldo-test">Probar</button>' : ''}</div>${settings.saldoURL ? sw('tiemposServidor', settings.tiemposServidor === true, 'Pedir también los tiempos a mi servidor', 'Normalmente NO funciona: TUSSAM bloquea a los servidores de internet con Cloudflare. Actívalo solo si tu servidor está en un sitio que TUSSAM deja pasar (pulsa «Probar»).') : ''}</div>
       <div class="set-group"><h3>Copia de seguridad</h3>
         <p>Guarda tus favoritas, tarjetas y ajustes en un archivo para no perderlos si cambias de móvil.</p>
         <div class="btn-row"><button class="btn ghost" type="button" id="s-exp">Guardar copia</button><label class="btn ghost" for="s-imp" style="cursor:pointer">Recuperar copia</label></div>
@@ -1800,14 +1836,14 @@ views.ajustes = (el) => {
     $('#s-saldo-test', el)?.addEventListener('click', async () => {
       toast('Probando el servidor…');
       try {
-        const base = settings.saldoURL.replace(/\/+$/, '');
+        const base = String(settings.saldoURL || '').replace(/\/+$/, '');
         const r = await fetch(`${base}/tiempos?p=2,3`, { headers: { Accept: 'application/json' } });
         if (r.status === 404 || r.status === 400) {
           const r2 = await fetch(`${base}/`, { headers: { Accept: 'text/html' } });
           toast(r2.ok ? 'Tu servidor responde, pero es la versión antigua: pon el código nuevo (mira su LEEME) para que dé los tiempos.' : `Responde con error ${r2.status}`);
         } else {
           const j = await r.json().catch(() => null);
-          toast(j?.version >= 2 ? (Object.values(j.paradas || {}).some((x) => x?.ok) ? 'Tu servidor responde y ya da los tiempos ✅' : 'Tu servidor responde ✅, pero ahora mismo no llega a TUSSAM') : `Responde con error ${r.status}`);
+          toast(j?.version >= 2 ? (Object.values(j.paradas || {}).some((x) => x?.ok) ? 'Tu servidor responde y además da los tiempos ✅' : 'Tu servidor responde ✅ (el saldo va), pero TUSSAM no le deja pedir los tiempos') : `Responde con error ${r.status}`);
         }
       } catch { toast('No se ha podido conectar con tu servidor'); }
     });
@@ -1906,6 +1942,7 @@ function route() {
   else if (navStack[navStack.length - 1] !== hh) navStack.push(hh);
   if (navStack.length > 30) navStack.splice(0, navStack.length - 30);
   document.querySelector('.modal-bg')?.remove();
+  window.BusSevBackend?.cancelarFondo?.();   // lo que se buscaba en la pantalla anterior ya no hace falta
   if (searchEl.value) { searchEl.value = ''; $('#q-clear').hidden = true; }
   const h = decodeURIComponent(location.hash.slice(1));
   let m;
