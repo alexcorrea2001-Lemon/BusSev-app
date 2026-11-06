@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Seguridad de red de BusSev.
+  - Nada de tráfico sin cifrar (HTTP), en ningún sitio.
+  - Para tussam.es: además de las autoridades del sistema, se confía en el certificado
+    intermedio de Sectigo que el servidor de TUSSAM se olvida de enviar (R36, y su raíz R46).
+    Así la verificación HTTPS es completa; no se desactiva ninguna comprobación.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">tussam.es</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/tussam_ca" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>
