@@ -203,6 +203,8 @@ para que entres con tu cuenta.
   [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) (Copyright (c) 2026 686f6c61).
   Por eso BusSev también es **solo para uso no comercial**. BusSev no usa su servidor: pregunta a TUSSAM desde el móvil.
 - Horarios, paradas y recorridos: GTFS oficial de TUSSAM (Punto de Acceso Nacional). Mapa: OpenFreeMap / OpenStreetMap.
+- Posición exacta de las paradas y recorridos por calle: © colaboradores de [OpenStreetMap](https://www.openstreetmap.org/copyright)
+  (ODbL), consultados al compilar con Overpass y OSRM (`scripts/paradas_osm.mjs` y `scripts/recorridos.mjs`).
 
 ### Aviso legal
 Uso **personal y no comercial**. Proyecto independiente, sin relación con TUSSAM. Los servicios de TUSSAM no son

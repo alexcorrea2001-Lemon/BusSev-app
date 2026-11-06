@@ -1,8 +1,10 @@
 // Calcula el recorrido de cada línea siguiendo las calles (no en línea recta entre paradas).
 // Se ejecuta en GitHub al compilar el APK y guarda el resultado en www/recorridos.js.
 // Usa el servidor público de OSRM (datos de OpenStreetMap). Si falla, la app usa líneas rectas.
+// Antes coloca cada parada en su sitio exacto según OpenStreetMap (paradas_osm.mjs).
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { paradasOSM } from './paradas_osm.mjs';
 
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -13,6 +15,17 @@ const ctx = { window: {} };
 vm.runInNewContext(fs.readFileSync(`${ROOT}www/data.js`, 'utf8'), ctx);
 const D = ctx.window.BUSSEV_DATA;
 const paradas = new Map(D.paradas.map((p) => [p.codigo, p]));
+
+/* 1) Posición real de cada parada según OpenStreetMap (las de TUSSAM a veces caen 50-100 m fuera de la calle) */
+let osm = new Map();
+if (!process.env.BUSSEV_SOLO_FUNCIONES) {
+  try {
+    const r = await paradasOSM(D.paradas);
+    osm = r.ajustes;
+    console.log(`OpenStreetMap: ${r.nodos} paradas de bus en la zona; colocadas ${r.porNumero} por número y ${r.porNombre} por nombre (de ${D.paradas.length}).`);
+  } catch (e) { console.log(`OpenStreetMap no disponible (${e.message}): se usan las coordenadas de TUSSAM.`); }
+  for (const [c, pos] of osm) { const p = paradas.get(c); if (p) { p.latitud = pos[0]; p.longitud = pos[1]; } }
+}
 
 const grupos = new Map();
 for (const [cod, lin, sentido, orden] of D.recorridos) {
@@ -58,10 +71,10 @@ async function porAjuste(stops) {
   return puntosDe(legs);
 }
 /* 2) Si el ajuste no sale, ruta normal parada a parada, llegando por el lado de la acera (derecha) */
-async function porRuta(stops) {
+async function porRuta(stops, acera = true) {
   const coords = stops.map((s) => `${s.lon.toFixed(6)},${s.lat.toFixed(6)}`).join(';');
-  const lados = stops.map(() => 'curb').join(';');
-  const url = `${OSRM}/route/v1/driving/${coords}?overview=false&steps=true&geometries=geojson&continue_straight=true&approaches=${lados}`;
+  const lados = acera ? `&approaches=${stops.map(() => 'curb').join(';')}` : '';
+  const url = `${OSRM}/route/v1/driving/${coords}?overview=false&steps=true&geometries=geojson&continue_straight=true${lados}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'BusSev (app personal)' }, signal: AbortSignal.timeout(9000) });
   if (!res.ok) throw new Error(`OSRM ${res.status}`);
   const j = await res.json();
@@ -98,7 +111,7 @@ export const tramoRaro = (leg, a, b) => {
   const recta = hav(a, b);
   return !leg.pts.length || esRodeo(leg.distancia, recta) || desvio(leg.pts, a, b) > Math.max(150, recta * 0.6);
 };
-let rehechos = 0;
+let rehechos = 0, rarosQuedan = 0;
 const MAX_REHECHOS = Number(process.env.OSRM_MAX_REHECHOS ?? 150);
 // GitHub corta este paso a los 10 min: se deja margen para guardar siempre lo calculado
 const INICIO = Date.now();
@@ -121,21 +134,28 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
     // Si el coche da un rodeo que el autobús no da (carriles bus, calles cortadas), ese tramo va en recta.
     // Tramo raro (rodeo o vuelta a la manzana): se recalcula solo ese tramo llegando por el lado de la acera;
     // si sigue raro, ese tramo va en línea recta entre las dos paradas.
+    /* Un tramo raro (rodeo o vuelta a la manzana) se recalcula de otras dos formas (llegando por el lado de la
+       acera y sin restricciones) y se queda el MEJOR camino POR CALLE de los tres. Nunca en línea recta por encima
+       de las casas: solo si OSRM no da ningún camino para ese tramo. */
+    const nota = (leg, a, b) => (leg?.pts?.length ? leg.distancia / Math.max(30, hav(a, b)) + desvio(leg.pts, a, b) / 100 : Infinity);
     const recto = [];
     for (let i = 0; i < legs.length; i++) {
       const a = [stops[i].lat, stops[i].lon], b = [stops[i + 1].lat, stops[i + 1].lon];
       if (!tramoRaro(legs[i], a, b)) { recto.push(false); continue; }
-      let arreglado = false;
-      if (rehechos < MAX_REHECHOS && quedaTiempo(7)) {
+      const opciones = [legs[i]];
+      for (const acera of [true, false]) {
+        if (rehechos >= MAX_REHECHOS || !quedaTiempo(7)) break;
         rehechos++;
         try {
           await esperar(PAUSA_MS);
-          const [nuevo] = await porRuta([stops[i], stops[i + 1]]);
-          if (nuevo && !tramoRaro(nuevo, a, b)) { legs[i] = nuevo; arreglado = true; }
-        } catch { /* se queda en recta */ }
+          const [nuevo] = await porRuta([stops[i], stops[i + 1]], acera);
+          if (nuevo?.pts?.length) opciones.push(nuevo);
+          if (nuevo && !tramoRaro(nuevo, a, b)) break;          // ya hay uno bueno
+        } catch { /* se prueba la siguiente forma */ }
       }
-      if (!arreglado) rectos++;
-      recto.push(!arreglado);
+      const mejor = opciones.filter((o) => o?.pts?.length).sort((x, y) => nota(x, a, b) - nota(y, a, b))[0];
+      if (mejor) { legs[i] = mejor; recto.push(false); if (tramoRaro(mejor, a, b)) rarosQuedan++; }
+      else { recto.push(true); rectos++; }
     }
     /* Las coordenadas de las paradas que publica TUSSAM a veces caen 20-30 m fuera de la calle (dentro de una
        manzana). Se usa el punto de la calle por donde pasa el autobús que OSRM ha encajado para esa parada,
@@ -146,6 +166,8 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
       if (i > 0 && !recto[i - 1]) cand.push(legs[i - 1].pts[legs[i - 1].pts.length - 1]);
       if (i < legs.length && !recto[i]) cand.push(legs[i].pts[0]);
       const q = cand.find((c) => c && hav(raw, c) <= 60);
+      // La línea pasa siempre por la calzada; el punto de la parada se dibuja donde diga OpenStreetMap (en la acera)
+      if (osm.has(stops[i].codigo)) return q || raw;
       if (!q) return raw;
       const dist = hav(raw, q);
       const prev = ajustes.get(stops[i].codigo);
@@ -178,5 +200,5 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
 
 if (!process.env.BUSSEV_SOLO_FUNCIONES) fs.writeFileSync(`${ROOT}www/recorridos.js`,
   `/* Recorridos por calle calculados con OSRM (© OpenStreetMap). ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n` +
-  `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)])))};\n`);
-if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rehechos} tramos raros recalculados, ${rectos} en recta, ${ajustes.size} paradas colocadas sobre la calle.`);
+  `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...[...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)]), ...osm]))};\n`);
+if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle.`);

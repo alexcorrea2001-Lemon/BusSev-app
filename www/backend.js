@@ -8,11 +8,11 @@
 'use strict';
 (() => {
   const D = window.BUSSEV_DATA;
-  // Paradas colocadas sobre la calle por la que pasa el autobús (se calcula al compilar, en recorridos.js)
+  // Paradas en su sitio exacto (OpenStreetMap) o pegadas a la calle del autobús (se calcula al compilar, en recorridos.js)
   const AJ = window.BUSSEV_PARADAS_AJUSTADAS || {};
   for (const p of D.paradas) {
     const a = AJ[p.codigo];
-    if (Array.isArray(a) && Math.abs(a[0] - p.latitud) < 0.001 && Math.abs(a[1] - p.longitud) < 0.001) { p.latitud = a[0]; p.longitud = a[1]; }
+    if (Array.isArray(a) && Math.abs(a[0] - p.latitud) < 0.005 && Math.abs(a[1] - p.longitud) < 0.005) { p.latitud = a[0]; p.longitud = a[1]; }
   }
   const ORIGEN = 'https://reddelineas.tussam.es';
   const CACHE_MS = 30_000;          // tiempos recientes que reutilizamos sin volver a preguntar
