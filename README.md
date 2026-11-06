@@ -161,9 +161,12 @@ npx cap open android   # en Android Studio: Build → Build APK
 El servidor de recargas de TUSSAM envía su certificado HTTPS sin el intermedio de Sectigo. La app lleva ese
 certificado público (`res/raw/tussam_ca.pem`) para que la verificación sea completa; no se desactiva ninguna comprobación.
 
-### Servidor propio (opcional)
-En `servidor-saldo/` hay un servidor pequeño (Deno Deploy gratis, o Google Cloud Run) que hace de respaldo:
-lee el saldo y guarda los tiempos de llegada por si TUSSAM falla. Se activa en *Ajustes → Tus datos → Servidor del saldo*.
+### Servidor propio (opcional, recomendado)
+Hay un servidor pequeño (Deno Deploy gratis, o Google Cloud Run) que lee el saldo y, **como hace SeviBus**, da los tiempos
+de llegada: la app se los pide a él (varias paradas en una sola consulta) y es él quien pregunta a TUSSAM, guardando cada
+respuesta unos segundos. Así TUSSAM no corta por «demasiadas consultas», que con datos móviles pasa mucho porque muchísima
+gente sale a internet con la misma dirección de la operadora. Si el servidor falla, la app pregunta a TUSSAM directamente.
+Se activa en *Ajustes → Tus datos → Tu servidor*.
 Las instrucciones están en su `LEEME.txt`.
 
 ### Paradas y recorridos: se actualizan solos
@@ -182,6 +185,11 @@ Si algún día el Ministerio pidiera una clave para descargar, regístrate grati
 en tu repositorio como secreto llamado `NAP_API_KEY` (*Settings → Secrets and variables → Actions*).
 
 Para hacerlo a mano: `python3 scripts/gtfs_a_datos.py <carpeta_gtfs_descomprimida> www/data.js www/data.js`.
+
+### Número de versión
+El nombre de la versión (v1.1.2, v1.1.3…) está en el archivo **`VERSION`** del repositorio: cámbialo cuando quieras
+estrenar versión. Cada compilación lleva además un número interno que siempre sube (el contador de GitHub + 100), que es
+el que deja instalar la nueva encima. Si vuelves a compilar la misma versión, su publicación en *Releases* se sustituye.
 
 ### Botón «Buscar actualización»
 Al compilar, GitHub apunta el número de versión en `www/version.js`. La app pregunta a GitHub cuál es la última

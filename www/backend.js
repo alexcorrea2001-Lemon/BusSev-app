@@ -123,7 +123,7 @@
     const item = { res };
     fila.push(item);
     const max = prioridad === 'baja' ? 20000 : 45000;
-    item.t = setTimeout(() => { const i = fila.indexOf(item); if (i >= 0) { fila.splice(i, 1); rej(new HttpError(429)); } }, max);
+    item.t = setTimeout(() => { const i = fila.indexOf(item); if (i >= 0) { fila.splice(i, 1); rej(new HttpError(enPausa() ? 429 : 408, 'ocupado')); } }, max);
     const r0 = item.res; item.res = () => { clearTimeout(item.t); r0(); };
     despachar();
   });
@@ -164,36 +164,89 @@
   }
 
   const espera = (ms) => new Promise((r) => setTimeout(r, ms));
-  /* Respaldo: tu propio servidor (el mismo del saldo), que guarda los últimos tiempos de TUSSAM */
-  async function pedirAlServidor(codigo) {
-    const base = (typeof settings !== 'undefined' && settings.saldoURL) ? String(settings.saldoURL).replace(/\/+$/, '') : '';
-    if (!base) throw new HttpError(502, 'Sin servidor propio');
+  /* ---------- Tu servidor (como SeviBus) ----------
+     SeviBus no pregunta a TUSSAM desde el móvil: se lo pide a su servidor, que guarda las respuestas.
+     Con datos móviles muchísima gente sale a internet con la MISMA dirección de la operadora,
+     así que TUSSAM corta aunque tú hagas pocas consultas. Si tienes tu servidor puesto en Ajustes,
+     BusSev hace lo mismo: le pide los tiempos a él (varias paradas en UNA sola consulta)
+     y solo si falla pregunta a TUSSAM directamente. */
+  const baseServidor = () => (typeof settings !== 'undefined' && settings.saldoURL) ? String(settings.saldoURL).replace(/\/+$/, '') : '';
+  let servidorV2 = null;          // null: no se sabe · true: admite varias paradas · false: servidor antiguo
+  let servidorMalHasta = 0, fallosServidor = 0;
+  const usarServidor = () => !!baseServidor() && settings.tiemposServidor !== false && Date.now() >= servidorMalHasta;
+  const servidorFallo = () => { if (++fallosServidor >= 2) { servidorMalHasta = Date.now() + 2 * 60_000; fallosServidor = 0; } };
+  const servidorBien = () => { fallosServidor = 0; };
+  function desdeServidor(j, codigo) {
+    if (!j?.ok || !j.tussam) throw new HttpError(502, j?.error || 'Tu servidor no tiene datos');
+    const d = normalizar(j.tussam, codigo);
+    return j.antiguo ? { ...d, stale: true, cached_at: new Date(j.at).toISOString() } : d;
+  }
+  async function pedirJSON(url, ms = 9000) {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 10000);
+    const t = setTimeout(() => ctrl.abort(), ms);
     try {
-      const r = await fetch(`${base}/tiempos/${encodeURIComponent(codigo)}`, { headers: { Accept: 'application/json' }, signal: ctrl.signal });
+      const r = await fetch(url, { headers: { Accept: 'application/json' }, signal: ctrl.signal });
+      if (r.status === 404 || r.status === 400) throw new HttpError(r.status);
       if (!r.ok) throw new HttpError(502, `Tu servidor respondió ${r.status}`);
-      const j = await r.json();
-      if (!j?.ok || !j.tussam) throw new HttpError(502, j?.error || 'Tu servidor no tiene datos');
-      const d = normalizar(j.tussam, codigo);
-      return j.antiguo ? { ...d, stale: true, cached_at: new Date(j.at).toISOString() } : d;
+      return await r.json();
     } finally { clearTimeout(t); }
   }
-  const servidorPropio = () => !!(typeof settings !== 'undefined' && settings.saldoURL);
-  /* Pide a TUSSAM. Si falla la red o TUSSAM da un error pasajero, lo intenta una vez más.
-     Si TUSSAM pide esperar, se espera en la fila (o se pregunta a tu servidor, si tienes uno). */
+  // Las paradas que se piden casi a la vez (las favoritas, la búsqueda de una línea…) van juntas
+  let lote = new Map(), loteT = 0;
+  function pedirAlServidor(codigo) {
+    return new Promise((res, rej) => {
+      if (!lote.has(codigo)) lote.set(codigo, []);
+      lote.get(codigo).push({ res, rej });
+      clearTimeout(loteT);
+      if (lote.size >= 12) enviarLote(); else loteT = setTimeout(enviarLote, 40);
+    });
+  }
+  async function enviarLote() {
+    clearTimeout(loteT);
+    const mio = lote; lote = new Map();
+    if (!mio.size) return;
+    const base = baseServidor();
+    const codigos = [...mio.keys()];
+    const cerrar = (c, err, val) => { for (const x of mio.get(c) || []) err ? x.rej(err) : x.res(val); };
+    if (servidorV2 !== false && codigos.length > 1) {
+      try {
+        const j = await pedirJSON(`${base}/tiempos?p=${codigos.map(encodeURIComponent).join(',')}`);
+        if (!j?.paradas) throw new HttpError(404);
+        servidorV2 = true; servidorBien();
+        for (const c of codigos) { try { cerrar(c, null, desdeServidor(j.paradas[c], c)); } catch (e) { cerrar(c, e); } }
+        return;
+      } catch (e) {
+        if (e.status === 404 || e.status === 400) servidorV2 = false;     // servidor antiguo: de una en una
+        else { servidorFallo(); for (const c of codigos) cerrar(c, e instanceof HttpError ? e : new HttpError(502, 'Tu servidor no responde')); return; }
+      }
+    }
+    await Promise.all(codigos.map(async (c) => {
+      try { const d = desdeServidor(await pedirJSON(`${base}/tiempos/${encodeURIComponent(c)}`), c); servidorBien(); cerrar(c, null, d); }
+      catch (e) { if (e.status !== 404) servidorFallo(); cerrar(c, e instanceof HttpError ? e : new HttpError(502, 'Tu servidor no responde')); }
+    }));
+  }
+  /* Primero tu servidor (si lo tienes); si falla, TUSSAM directo, en la fila.
+     Si TUSSAM da un error pasajero, se intenta una vez más. */
   async function pedirATussam(codigo, prioridad) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new HttpError(503, 'Sin conexión a internet');
-    if (enPausa() && servidorPropio()) { try { return await pedirAlServidor(codigo); } catch { /* sigue con TUSSAM */ } }
+    let viejo = null;
+    if (usarServidor()) {
+      try {
+        const d = await pedirAlServidor(codigo);
+        if (!d.stale) return d;
+        viejo = d;                       // tu servidor tampoco llega a TUSSAM ahora: se prueba directo
+        if (enPausa() || prioridad === 'baja') return d;
+      } catch (e) { if (e.status === 404) throw e; }
+    }
     let ultimo;
     for (let intento = 0; intento < 2; intento++) {
       try { return await pedirUnaVez(codigo, prioridad); } catch (e) {
         ultimo = e;
-        if (e.status === 404 || prioridad === 'baja') break;
+        if (e.status === 404 || e.status === 408 || prioridad === 'baja') break;
         if (e.status !== 429) await espera(1200);
       }
     }
-    try { return await pedirAlServidor(codigo); } catch { /* sin respaldo */ }
+    if (viejo) return viejo;
     throw ultimo;
   }
   async function pedirUnaVez(codigo, prioridad) {
@@ -207,7 +260,7 @@
           headers: { Accept: 'application/json', Referer: `${ORIGEN}/` }, signal: ctrl.signal,
         });
       } finally { clearTimeout(t); }
-      if (res.status === 429 || res.status === 503) {
+      if (res.status === 429) {
         let ra = parseInt(res.headers.get('Retry-After') || '', 10);
         if (!(ra > 0)) ra = 5;
         pausaHasta = Math.max(pausaHasta, Date.now() + Math.min(Math.max(ra, 3), 60) * 1000);
@@ -283,5 +336,5 @@
     throw new HttpError(404);
   }
 
-  window.BusSevBackend = { get, HttpError, get pausa() { return Math.max(0, pausaHasta - Date.now()); }, generado: D.generado, caduca: D.caduca, caducados };
+  window.BusSevBackend = { get, HttpError, get pausa() { return Math.max(0, pausaHasta - Date.now()); }, get viaServidor() { return usarServidor(); }, generado: D.generado, caduca: D.caduca, caducados };
 })();

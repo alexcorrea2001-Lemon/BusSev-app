@@ -14,7 +14,7 @@ const DEFAULTS = {
   theme: 'dark', color: 'rojo', refresh: 30, liveLines: true, mapStyle: 'oscuro',
   tematicaAuto: true, tematica: 'normal',
   voz: false, vozAuto: false, letraGrande: false, altoContraste: false, menosAnimaciones: false, vibrar: true, botonesGrandes: false,
-  revisarCada: 3, avisosTussam: 'mias', saldoURL: '', fondo: '', vehiculosFiesta: false, avisarVersion: true,
+  revisarCada: 3, avisosTussam: 'mias', saldoURL: '', tiemposServidor: true, fondo: '', vehiculosFiesta: false, avisarVersion: true,
 };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
 if (!['oscuro', 'claro', 'tema'].includes(settings.mapStyle)) settings.mapStyle = 'oscuro';
@@ -250,6 +250,7 @@ async function api(path, { timeout, prioridad, maxEdad } = {}) {
   } catch (e) {
     if (e.status === 429) throw new ApiError('TUSSAM va saturado ahora mismo. BusSev lo vuelve a intentar solo en unos segundos.', 429);
     if (e.status === 404) throw new ApiError('No se ha encontrado.', 404);
+    if (e.status === 408) throw new ApiError('Hay muchas consultas en cola. Se actualizará en un momento.', 408);
     if (e.name === 'AbortError') throw new ApiError('La conexión está tardando demasiado. Comprueba tu cobertura.');
     throw new ApiError('No hay conexión con TUSSAM. Comprueba tu conexión a internet.');
   } finally { clearTimeout(t); }
@@ -335,6 +336,10 @@ const actualizaciones = {
   paginaVersiones() { const r = this.version().repo; return r ? `https://github.com/${r}/releases/latest` : ''; },
   /* Solo se abren enlaces de GitHub (por seguridad) */
   enlaceSeguro(u) { try { const x = new URL(u); return x.protocol === 'https:' && /(^|\.)github\.com$|(^|\.)githubusercontent\.com$/.test(x.hostname) ? x.href : ''; } catch { return ''; } },
+  /* «v1.1.2» → [1,1,2] */
+  partes(t) { const m = String(t || '').match(/(\d+)\.(\d+)\.(\d+)/); return m ? m.slice(1).map(Number) : null; },
+  comparar(a, b) { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i]; return 0; },
+  nombre() { const v = this.version(); return v.version ? `v${v.version}` : (v.build ? `compilación ${v.build}` : 'de prueba'); },
   async buscar() {
     const v = this.version();
     if (!/^[\w.-]+\/[\w.-]+$/.test(v.repo || '')) return { estado: 'sin-repo' };
@@ -345,11 +350,20 @@ const actualizaciones = {
       if ([401, 403, 404].includes(r.status)) return { estado: 'privado' };   // repositorio privado: GitHub no deja mirarlo sin entrar
       if (!r.ok) throw new Error(`GitHub ha respondido con un error (${r.status}).`);
       const j = await r.json();
-      const nueva = Number(String(j.tag_name || '').replace(/\D/g, '')) || 0;
+      const tag = String(j.tag_name || '');
+      // Cada versión publicada lleva escondido su número de compilación: así se sabe si es más nueva
+      // aunque tenga el mismo nombre (p. ej. la v1.1.2 recompilada con los horarios nuevos).
+      const buildRemota = Number(String(j.body || '').match(/bussev-build:(\d+)/)?.[1]) || 0;
+      const pr = this.partes(tag), pm = this.partes(v.version);
+      let hay;
+      if (buildRemota && v.build) hay = buildRemota > v.build;
+      else if (pr && pm) hay = this.comparar(pr, pm) > 0;
+      else hay = (Number(tag.replace(/\D/g, '')) || 0) > (v.build || 0);
+      const mismoNombre = pr && pm && this.comparar(pr, pm) === 0;
       const apk = (j.assets || []).find((a) => /\.apk$/i.test(a.name || ''))?.browser_download_url;
       const url = this.enlaceSeguro(apk || j.html_url || '') || this.paginaVersiones();
       store.set('ultimaRevisionVersion', Date.now());
-      return { estado: nueva > (v.build || 0) ? 'nueva' : 'al-dia', nueva, url, fecha: j.published_at || '' };
+      return { estado: hay ? 'nueva' : 'al-dia', nueva: pr ? `v${pr.join('.')}` : tag, mismoNombre, clave: `${tag}#${buildRemota}`, url, fecha: j.published_at || '' };
     } finally { clearTimeout(t); }
   },
   /* Al abrir la app, como mucho una vez al día: si hay versión nueva, te avisa */
@@ -358,9 +372,9 @@ const actualizaciones = {
     if (Date.now() - store.get('ultimaRevisionVersion', 0) < 24 * 3600_000) return;
     store.set('ultimaRevisionVersion', Date.now());
     const r = await this.buscar().catch(() => null);
-    if (r?.estado === 'nueva' && store.get('versionAvisada', 0) !== r.nueva) {
-      store.set('versionAvisada', r.nueva);
-      toast(`Hay una versión nueva de BusSev (${r.nueva}). Mírala en Ajustes → Actualizaciones.`);
+    if (r?.estado === 'nueva' && store.get('versionAvisada', '') !== r.clave) {
+      store.set('versionAvisada', r.clave);
+      toast(r.mismoNombre ? 'Hay una actualización de BusSev. Mírala en Ajustes → Actualizaciones.' : `Hay una versión nueva de BusSev (${r.nueva}). Mírala en Ajustes → Actualizaciones.`);
     }
   },
 };
@@ -902,7 +916,7 @@ async function estimateBuses(codigo, tiempos) {
    hasta llegar al principio de la línea (o hasta que TUSSAM dé menos de 2: ya no hay más).
    Una línea con 6 autobuses se resuelve con 3-4 consultas, una detrás de otra, en vez de 10-15 a la vez. */
 const porParadaTussam = 2;  // cuántos autobuses por línea da TUSSAM en cada parada
-async function liveBusesLine(linea, sentido, stops, alAvanzar) {
+async function liveBusesLine(linea, sentido, stops, alAvanzar, cancelado = () => false) {
   if (!stops?.length) return { buses: [], ok: 0, total: 0 };
   const shape = getShape(linea.numero, sentido, stops);
   const best = new Map();
@@ -911,17 +925,19 @@ async function liveBusesLine(linea, sentido, stops, alAvanzar) {
   let k = stops.length - 1;
   const consultadas = new Set();
   while (k >= 0 && hechas < MAX_CONSULTAS) {
-    if (consultadas.has(k)) break;
+    if (consultadas.has(k) || cancelado()) break;
     consultadas.add(k);
     hechas++;
     let d;
     try { d = await api(`/paradas/${encodeURIComponent(stops[k].codigo)}/tiempos`, { prioridad: 'baja', maxEdad: 25_000 }); } catch (e) {
       if (e.status === 429) { limited = true; break; }
+      if (e.status === 408 || cancelado()) break;
       // parada sin datos: se prueba con la anterior (dos fallos seguidos: se para)
       if (++fallos >= 2) break;
       k -= 3; continue;
     }
     fallos = 0;
+    if (cancelado()) break;
     if (d.upstream_status === 'unavailable') { k -= 3; continue; }
     ok++;
     const mias = (d.tiempos || []).filter((t) => lineaFor(t.linea)?.numero === linea.numero && (!t.sentido || t.sentido === sentido) && t.distancia_metros != null);
@@ -958,8 +974,8 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
     markers.clear();
     bm.fit(shape.pts, { padding: { top: 120, bottom: 40, left: 30, right: 30 } });
     cur = { l, sentido, stops };
-    stopLive?.();
-    if (!settings.liveLines) { onStatus?.('Autobuses en directo desactivados en Ajustes.'); return; }
+    parar();
+    if (!settings.liveLines) { onStatus?.('Autobuses en directo desactivados (botón 🚌 del mapa o Ajustes).'); return; }
     live();
     stopLive = autoRefresh(live, { min: REFRESH_LINE_MIN });
   }
@@ -973,7 +989,7 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
         if (my !== seq) return;
         markers.sync(parcial.map((b) => ({ ...b, linea: l.numero, color: l.color })), l.numero, l.color, { parcial: true });
         onStatus?.(`${cargandoMini()} Buscando autobuses…${parcial.length ? ` ${parcial.length} encontrado${parcial.length === 1 ? '' : 's'}` : ''}`, true);
-      });
+      }, () => my !== seq || !settings.liveLines);
       if (my !== seq) return;
       markers.sync(r.buses.map((b) => ({ ...b, linea: l.numero, color: l.color })), l.numero, l.color);
       onBuses?.(r.buses);
@@ -982,8 +998,10 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
         : `${r.buses.length ? `${r.buses.length} ${r.buses.length === 1 ? 'autobús' : 'autobuses'} en este sentido` : 'Ahora mismo no hay autobuses en este sentido'} · ${fmtClock()}`);
     } finally { if (my === seq) spin(false); }
   }
-  function clear() { stopLive?.(); stopLive = null; seq++; cur = null; markers.clear(); bm.source('bs-route', fc([])); bm.source('bs-route-stops', fc([])); }
-  return { show, live, clear, stop: () => { stopLive?.(); stopLive = null; }, resume: () => { if (cur && !stopLive && settings.liveLines) { live(); stopLive = autoRefresh(live, { min: REFRESH_LINE_MIN }); } }, get current() { return cur; } };
+  /* Dejar de consultar: se corta también la búsqueda que esté a medias y se para el ⟳ */
+  function parar() { stopLive?.(); stopLive = null; seq++; spin(false); }
+  function clear() { parar(); cur = null; markers.clear(); bm.source('bs-route', fc([])); bm.source('bs-route-stops', fc([])); }
+  return { show, live: () => { if (cur && settings.liveLines) return live(); }, clear, stop: parar, resume: () => { if (cur && !stopLive && settings.liveLines) { live(); stopLive = autoRefresh(live, { min: REFRESH_LINE_MIN }); } }, get current() { return cur; } };
 }
 /* Dibuja los buses que vienen a una parada y su camino */
 function drawApproaching(bm, markers, buses) {
@@ -1192,7 +1210,7 @@ function renderLineBar() {
         <button class="x" type="button" id="ml-close" aria-label="Quitar la línea del mapa">${ICON.close}</button></div>
       ${sentidos.length > 1 ? `<div class="seg">${sentidos.map((s) => `<button type="button" data-ms="${s}" aria-pressed="${s === mapState.sentido}" aria-label="${esc(same ? (s === 1 ? 'Ida' : 'Vuelta') : 'Hacia ' + lastName(s))}">${same ? `<span class="dst">${s === 1 ? 'Ida' : 'Vuelta'}</span>` : `<small>Hacia</small><span class="dst">${esc(lastName(s))}</span>`}</button>`).join('')}</div>` : ''}
       <div class="live" id="ml-live"></div></div>`;
-    $('#ml-close').onclick = () => { mapState.line.clear(); mapState.linea = null; renderLineBar(); mapState.zona?.cargar(true); };
+    $('#ml-close').onclick = () => { mapState.line.clear(); mapState.linea = null; renderLineBar(); };
     $('#ml-change').onclick = pickLineModal;
     bar.querySelectorAll('[data-ms]').forEach((b) => { b.onclick = () => { mapState.sentido = Number(b.dataset.ms); renderLineBar(); mapState.line.show(l, mapState.sentido); }; });
   });
@@ -1322,7 +1340,7 @@ views.mapa = (el) => {
     pintarBotonBuses();
     toast(settings.liveLines ? 'Autobuses en directo activados' : 'Autobuses en directo desactivados');
     if (settings.liveLines) { if (mapState.linea && !mapState.sel) { mapState.line.stop(); mapState.line.resume(); } mapState.zona?.cargar(true); }
-    else { mapState.zona?.ocultar(); if (mapState.linea) { mapState.line.stop(); mapState.lineMarkers.clear(); const n = $('#ml-live'); if (n) n.textContent = 'Autobuses en directo desactivados (botón 🚌 del mapa).'; } }
+    else { mapState.zona?.ocultar(); mapState.line?.stop(); mapState.lineMarkers?.clear(); spin(false); const n = $('#ml-live'); if (n) n.textContent = 'Autobuses en directo desactivados (botón 🚌 del mapa).'; }
   };
   $('#btn-mapfull', el).onclick = () => mapaPantallaCompleta(!mapCompleto);
   if (mapState.pending) { const n = mapState.pending; mapState.pending = null; chooseMapLine(n); }
@@ -1331,11 +1349,15 @@ views.mapa = (el) => {
     back: () => {
       if (mapState.sel) { if (!mapState.sheetCollapsed?.()) mapState.sheetTo?.(2); else closeSheet(); return true; }
       if (mapCompleto) { mapaPantallaCompleta(false); return true; }
-      if (mapState.linea) { mapState.line.clear(); mapState.linea = null; renderLineBar(); mapState.zona?.cargar(true); return true; }
+      if (mapState.linea) { mapState.line.clear(); mapState.linea = null; renderLineBar(); return true; }
       return false;
     },
     cleanup: () => { mapState.stopTimer?.(); mapState.stopTimer = null; mapState.line?.stop(); mapState.zona?.parar(); if (mapCompleto) mapaPantallaCompleta(false); },
-    refresh: () => (mapState.sel ? mapState.reload?.() : mapState.line?.live()),
+    refresh: () => {
+      if (mapState.sel) return mapState.reload?.();
+      if (!settings.liveLines) { toast('Los autobuses en directo están desactivados (botón 🚌)'); return; }
+      return mapState.linea ? mapState.line?.live() : mapState.zona?.cargar(true);
+    },
   };
 };
 
@@ -1708,10 +1730,10 @@ views.ajustes = (el) => {
       <div class="set-group"><h3>Tarifas y títulos de viaje</h3><p>Los precios actuales de TUSSAM, leídos de su web (se actualizan solos).</p><a class="btn ghost" href="#tarifas">Ver las tarifas</a></div>
 
       <h2 class="section-title">Tus datos</h2>
-      <div class="set-group"><h3>Servidor del saldo (avanzado)</h3>
-        <p>Si has montado tu propio servidor del saldo, pega aquí su dirección y BusSev te enseñará el saldo de la tarjeta solo. Déjalo vacío para no usarlo.</p>
+      <div class="set-group"><h3>Tu servidor: saldo y tiempos (avanzado)</h3>
+        <p>Si has montado tu propio servidor (carpeta <i>servidor-saldo</i>), pega aquí su dirección. BusSev te enseñará el saldo de la tarjeta y, como hace SeviBus, le pedirá a él los tiempos de llegada: así TUSSAM no te corta por «demasiadas consultas». Si tu servidor falla, BusSev pregunta a TUSSAM directamente. Déjalo vacío para no usarlo.</p>
         <div class="field"><input id="s-saldo-url" class="mini-input" style="width:100%" inputmode="url" autocomplete="off" placeholder="https://tu-servidor.deno.dev" value="${esc(settings.saldoURL || '')}"></div>
-        <div class="btn-row"><button class="btn ghost" type="button" id="s-saldo-save">Guardar</button>${settings.saldoURL ? '<button class="btn ghost" type="button" id="s-saldo-test">Probar</button>' : ''}</div></div>
+        <div class="btn-row"><button class="btn ghost" type="button" id="s-saldo-save">Guardar</button>${settings.saldoURL ? '<button class="btn ghost" type="button" id="s-saldo-test">Probar</button>' : ''}</div>${settings.saldoURL ? sw('tiemposServidor', settings.tiemposServidor !== false, 'Pedir los tiempos a mi servidor', 'Recomendado. Si lo quitas, los tiempos se piden siempre a TUSSAM desde el móvil.') : ''}</div>
       <div class="set-group"><h3>Copia de seguridad</h3>
         <p>Guarda tus favoritas, tarjetas y ajustes en un archivo para no perderlos si cambias de móvil.</p>
         <div class="btn-row"><button class="btn ghost" type="button" id="s-exp">Guardar copia</button><label class="btn ghost" for="s-imp" style="cursor:pointer">Recuperar copia</label></div>
@@ -1721,8 +1743,8 @@ views.ajustes = (el) => {
         <p>Permisos: internet, ubicación (opcional), NFC (solo con la pestaña Tarjeta abierta) y notificaciones (solo si activas algún aviso).</p></div>
       <h2 class="section-title">Actualizaciones</h2>
       <div class="set-group">
-        <div class="ver-fila"><div><h3>BusSev ${actualizaciones.version().build ? `versión ${actualizaciones.version().build}` : '(versión de prueba)'}</h3>
-          <p>${actualizaciones.version().fecha ? `Compilada el ${new Date(actualizaciones.version().fecha + 'T12:00').toLocaleDateString('es-ES')}. ` : ''}Paradas y recorridos oficiales de TUSSAM${dc ? `, válidos hasta el <b>${dc.toLocaleDateString('es-ES')}</b>` : ''}.</p></div></div>
+        <div class="ver-fila"><div><h3>BusSev ${esc(actualizaciones.nombre())}</h3>
+          <p>${actualizaciones.version().fecha ? `Compilada el ${new Date(actualizaciones.version().fecha + 'T12:00').toLocaleDateString('es-ES')}${actualizaciones.version().build ? ` (compilación ${actualizaciones.version().build})` : ''}. ` : ''}Paradas y recorridos oficiales de TUSSAM${dc ? `, válidos hasta el <b>${dc.toLocaleDateString('es-ES')}</b>` : ''}.</p></div></div>
         <div id="s-ver-res"></div>
         <button class="btn block" type="button" id="s-ver">🔄 Buscar actualización</button>
         <p>Cada versión nueva lleva ya los horarios y recorridos oficiales más recientes (GitHub los descarga solo del Punto de Acceso Nacional de Transportes, y el día 1 de cada mes revisa si TUSSAM ha publicado otros). Se instala encima, sin perder nada.</p>
@@ -1757,7 +1779,7 @@ views.ajustes = (el) => {
       try {
         const r = await actualizaciones.buscar();
         if (r.estado === 'nueva') {
-          box.innerHTML = `<div class="ver-res nueva"><b>✨ Hay una versión nueva: la ${r.nueva}</b><span>Descárgala e instálala encima de esta.</span><button class="btn" type="button" id="s-ver-bajar">Descargar</button></div>`;
+          box.innerHTML = `<div class="ver-res nueva"><b>✨ ${r.mismoNombre ? `Hay una actualización de la ${esc(r.nueva)}` : `Hay una versión nueva: la ${esc(r.nueva)}`}</b><span>Descárgala e instálala encima de esta.</span><button class="btn" type="button" id="s-ver-bajar">Descargar</button></div>`;
           $('#s-ver-bajar', el).onclick = () => openWeb(r.url);
         } else if (r.estado === 'al-dia') {
           box.innerHTML = '<div class="ver-res"><b>✅ Tienes la última versión</b></div>';
@@ -1778,8 +1800,15 @@ views.ajustes = (el) => {
     $('#s-saldo-test', el)?.addEventListener('click', async () => {
       toast('Probando el servidor…');
       try {
-        const r = await fetch(`${settings.saldoURL.replace(/\/+$/, '')}/`, { headers: { Accept: 'text/html' } });
-        toast(r.ok ? 'Tu servidor responde ✅' : `Responde con error ${r.status}`);
+        const base = settings.saldoURL.replace(/\/+$/, '');
+        const r = await fetch(`${base}/tiempos?p=2,3`, { headers: { Accept: 'application/json' } });
+        if (r.status === 404 || r.status === 400) {
+          const r2 = await fetch(`${base}/`, { headers: { Accept: 'text/html' } });
+          toast(r2.ok ? 'Tu servidor responde, pero es la versión antigua: pon el código nuevo (mira su LEEME) para que dé los tiempos.' : `Responde con error ${r2.status}`);
+        } else {
+          const j = await r.json().catch(() => null);
+          toast(j?.version >= 2 ? (Object.values(j.paradas || {}).some((x) => x?.ok) ? 'Tu servidor responde y ya da los tiempos ✅' : 'Tu servidor responde ✅, pero ahora mismo no llega a TUSSAM') : `Responde con error ${r.status}`);
+        }
       } catch { toast('No se ha podido conectar con tu servidor'); }
     });
     $('#s-exp', el).onclick = () => copia.exportar().catch(() => toast('No se ha podido guardar la copia.'));
