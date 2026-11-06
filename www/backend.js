@@ -8,7 +8,7 @@
   const ORIGEN = 'https://reddelineas.tussam.es';
   const CACHE_MS = 30_000;          // tiempos recientes que reutilizamos sin volver a preguntar
   const STALE_MS = 10 * 60_000;     // si TUSSAM falla, enseñamos lo último bueno hasta 10 min
-  const MAX_SIMULTANEAS = 4;
+  const MAX_SIMULTANEAS = 2;
 
   const paradaByCode = new Map(D.paradas.map((p) => [p.codigo, p]));
   const lineaByNum = new Map(D.lineas.map((l) => [l.numero, l]));
@@ -82,12 +82,53 @@
   }
 
   /* ---------- tiempos desde TUSSAM ---------- */
+  /* TUSSAM corta (429) si le llegan muchas consultas seguidas desde el mismo móvil.
+     Por eso todas las consultas pasan por una sola fila:
+     - como mucho 2 a la vez y separadas un poco entre sí;
+     - un «cupo» que se va rellenando: las de segundo plano (buscar autobuses de una línea)
+       solo salen si queda cupo de sobra, para que lo que estás mirando vaya siempre primero;
+     - si TUSSAM pide esperar, la fila se para ese tiempo y luego sigue sola (no da error),
+       y durante un rato va más despacio. */
   const cache = new Map();      // parada -> {at, data}
   const enVuelo = new Map();    // parada -> Promise
-  let pausaHasta = 0;           // si TUSSAM nos pide esperar (429)
-  let activas = 0; const cola = [];
-  const turno = () => new Promise((res) => { if (activas < MAX_SIMULTANEAS) { activas++; res(); } else cola.push(res); });
-  const liberar = () => { const n = cola.shift(); if (n) n(); else activas--; };
+  let pausaHasta = 0;           // TUSSAM nos ha pedido esperar (429) hasta aquí
+  let despacioHasta = 0;        // tras un 429, va a medio ritmo un rato
+  const CUPO_MAX = 12, RELLENO_MS = 2500, ESPACIO_MS = 300, CUPO_FONDO = 5;
+  let cupo = CUPO_MAX, rellenado = Date.now(), ultimaSalida = 0;
+  let activas = 0, temporizador = 0;
+  const filas = { alta: [], baja: [] };
+  function rellenar() {
+    const ahora = Date.now(), paso = ahora < despacioHasta ? RELLENO_MS * 2 : RELLENO_MS;
+    const n = Math.floor((ahora - rellenado) / paso);
+    if (n > 0) { cupo = Math.min(CUPO_MAX, cupo + n); rellenado += n * paso; }
+    if (cupo >= CUPO_MAX) rellenado = ahora;
+  }
+  function despachar() {
+    clearTimeout(temporizador); temporizador = 0;
+    while (activas < MAX_SIMULTANEAS && (filas.alta.length || filas.baja.length)) {
+      rellenar();
+      const ahora = Date.now();
+      let falta = Math.max(pausaHasta - ahora, ultimaSalida + ESPACIO_MS - ahora, 0);
+      const fila = filas.alta.length ? filas.alta : filas.baja;
+      const minimo = fila === filas.alta ? 1 : CUPO_FONDO;
+      if (cupo < minimo) falta = Math.max(falta, (minimo - cupo) * RELLENO_MS / 2);
+      if (falta > 0) { temporizador = setTimeout(despachar, Math.min(falta, 30000)); return; }
+      cupo--; activas++; ultimaSalida = ahora;
+      fila.shift().res();
+    }
+  }
+  /* Espera turno. Las de segundo plano se rinden si tardan demasiado (no se acumulan). */
+  const turno = (prioridad) => new Promise((res, rej) => {
+    const fila = prioridad === 'baja' ? filas.baja : filas.alta;
+    const item = { res };
+    fila.push(item);
+    const max = prioridad === 'baja' ? 20000 : 45000;
+    item.t = setTimeout(() => { const i = fila.indexOf(item); if (i >= 0) { fila.splice(i, 1); rej(new HttpError(429)); } }, max);
+    const r0 = item.res; item.res = () => { clearTimeout(item.t); r0(); };
+    despachar();
+  });
+  const liberar = () => { activas = Math.max(0, activas - 1); despachar(); };
+  const enPausa = () => Date.now() < pausaHasta;
 
   function normalizar(json, codigo) {
     let r = json && json.result;
@@ -138,24 +179,25 @@
       return j.antiguo ? { ...d, stale: true, cached_at: new Date(j.at).toISOString() } : d;
     } finally { clearTimeout(t); }
   }
-  /* Pide a TUSSAM; si falla la red o TUSSAM da un error pasajero, lo intenta otra vez
-     (no si TUSSAM pide esperar), y si sigue fallando prueba con tu servidor. */
-  async function pedirATussam(codigo) {
+  const servidorPropio = () => !!(typeof settings !== 'undefined' && settings.saldoURL);
+  /* Pide a TUSSAM. Si falla la red o TUSSAM da un error pasajero, lo intenta una vez más.
+     Si TUSSAM pide esperar, se espera en la fila (o se pregunta a tu servidor, si tienes uno). */
+  async function pedirATussam(codigo, prioridad) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new HttpError(503, 'Sin conexión a internet');
+    if (enPausa() && servidorPropio()) { try { return await pedirAlServidor(codigo); } catch { /* sigue con TUSSAM */ } }
     let ultimo;
-    for (const pausa of [0, 800, 2000]) {
-      if (pausa) await espera(pausa);
-      try { return await pedirUnaVez(codigo); } catch (e) {
+    for (let intento = 0; intento < 2; intento++) {
+      try { return await pedirUnaVez(codigo, prioridad); } catch (e) {
         ultimo = e;
-        if (e.status === 429 || e.status === 404) break;
+        if (e.status === 404 || prioridad === 'baja') break;
+        if (e.status !== 429) await espera(1200);
       }
     }
     try { return await pedirAlServidor(codigo); } catch { /* sin respaldo */ }
     throw ultimo;
   }
-  async function pedirUnaVez(codigo) {
-    if (Date.now() < pausaHasta) throw new HttpError(429);
-    await turno();
+  async function pedirUnaVez(codigo, prioridad) {
+    await turno(prioridad);
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 12000);
@@ -165,9 +207,12 @@
           headers: { Accept: 'application/json', Referer: `${ORIGEN}/` }, signal: ctrl.signal,
         });
       } finally { clearTimeout(t); }
-      if (res.status === 429) {
-        const ra = parseInt(res.headers.get('Retry-After') || '15', 10);
-        pausaHasta = Date.now() + Math.min(Math.max(ra, 5), 120) * 1000;
+      if (res.status === 429 || res.status === 503) {
+        let ra = parseInt(res.headers.get('Retry-After') || '', 10);
+        if (!(ra > 0)) ra = 5;
+        pausaHasta = Math.max(pausaHasta, Date.now() + Math.min(Math.max(ra, 3), 60) * 1000);
+        despacioHasta = Date.now() + 5 * 60_000;
+        cupo = Math.min(cupo, 2);
         throw new HttpError(429);
       }
       if (!res.ok) throw new HttpError(502, `TUSSAM respondió ${res.status}`);
@@ -177,12 +222,14 @@
     } finally { liberar(); }
   }
 
-  async function tiempos(codigo) {
+  /* prioridad: 'alta' (lo que estás mirando) o 'baja' (buscar autobuses por la línea) */
+  async function tiempos(codigo, prioridad = 'alta', maxEdad = CACHE_MS) {
     const c = cache.get(codigo);
-    if (c && Date.now() - c.at < CACHE_MS) return c.data;
+    if (c && Date.now() - c.at < maxEdad) return c.data;
     if (enVuelo.has(codigo)) return enVuelo.get(codigo);
-    const p = pedirATussam(codigo).then((data) => {
+    const p = pedirATussam(codigo, prioridad).then((data) => {
       cache.set(codigo, { at: Date.now(), data });
+      if (cache.size > 400) cache.delete(cache.keys().next().value);
       return data;
     }).catch((e) => {
       if (c && Date.now() - c.at < STALE_MS) return { ...c.data, stale: true, cached_at: new Date(c.at).toISOString() };
@@ -193,7 +240,7 @@
   }
 
   /* ---------- rutas ---------- */
-  async function get(path) {
+  async function get(path, opciones = {}) {
     const u = new URL(path, 'https://bussev.local');
     const seg = u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     const q = u.searchParams;
@@ -212,7 +259,7 @@
       if (seg.length === 2) return p;
       if (seg[2] === 'lineas') return [...(lineasEn.get(codigo) || [])].sort((a, b) => (ordenLineas.get(a) ?? 999) - (ordenLineas.get(b) ?? 999));
       if (seg[2] === 'tiempos') {
-        try { return await tiempos(codigo); } catch (e) {
+        try { return await tiempos(codigo, opciones.prioridad === 'baja' ? 'baja' : 'alta', opciones.maxEdad || CACHE_MS); } catch (e) {
           if (e.status === 429) throw e;
           return { parada: codigo, nombre: p.nombre, latitud: p.latitud, longitud: p.longitud, tiempos: [], upstream_status: 'unavailable' };
         }
@@ -236,5 +283,5 @@
     throw new HttpError(404);
   }
 
-  window.BusSevBackend = { get, HttpError, generado: D.generado, caduca: D.caduca, caducados };
+  window.BusSevBackend = { get, HttpError, get pausa() { return Math.max(0, pausaHasta - Date.now()); }, generado: D.generado, caduca: D.caduca, caducados };
 })();

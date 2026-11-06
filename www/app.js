@@ -238,18 +238,21 @@ const ICON = {
 /* Datos                                                               */
 /* ================================================================== */
 class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
-async function api(path, { timeout = 12000 } = {}) {
+async function api(path, { timeout, prioridad, maxEdad } = {}) {
+  // Las consultas de tiempos esperan su turno en la fila (ver backend.js): el límite es más largo
+  timeout ??= /\/tiempos$/.test(path) ? 50000 : 12000;
+  let t;
   try {
     return await Promise.race([
-      window.BusSevBackend.get(path),
-      new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), { name: 'AbortError' })), timeout + 3000)),
+      window.BusSevBackend.get(path, { prioridad, maxEdad }),
+      new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error('timeout'), { name: 'AbortError' })), timeout + 3000); }),
     ]);
   } catch (e) {
-    if (e.status === 429) throw new ApiError('TUSSAM está recibiendo demasiadas consultas. Espera unos segundos y vuelve a intentarlo.', 429);
+    if (e.status === 429) throw new ApiError('TUSSAM va saturado ahora mismo. BusSev lo vuelve a intentar solo en unos segundos.', 429);
     if (e.status === 404) throw new ApiError('No se ha encontrado.', 404);
     if (e.name === 'AbortError') throw new ApiError('La conexión está tardando demasiado. Comprueba tu cobertura.');
     throw new ApiError('No hay conexión con TUSSAM. Comprueba tu conexión a internet.');
-  }
+  } finally { clearTimeout(t); }
 }
 const cache = { paradasP: null, paradaByCode: new Map(), lineasP: null, lineaByNum: new Map(), rutas: new Map(), shapes: new Map() };
 function getParadas() {
@@ -585,7 +588,28 @@ const resumeHandlers = new Set();
 // Al recuperar la conexión, se actualiza lo que estés viendo sin tocar nada
 window.addEventListener('online', () => { if (appVisible) { toast('Conexión recuperada'); setTimeout(() => active?.refresh?.(), 400); } });
 window.addEventListener('offline', () => toast('Sin conexión: se muestran los últimos datos'));
-function setVisible(v) { const was = appVisible; appVisible = v; document.documentElement.classList.toggle('oculta', !v); if (v && !was) for (const fn of resumeHandlers) fn(); }
+function setVisible(v) { const was = appVisible; appVisible = v; document.documentElement.classList.toggle('oculta', !v); if (v && !was) { repintar(); for (const fn of resumeHandlers) fn(); } }
+/* Al volver de otra app, a veces Android no vuelve a pintar la pantalla (se queda gris hasta tocar algo).
+   Se fuerza un repintado, se recolocan los mapas (y se rehacen si el móvil les quitó la gráfica)
+   y se arreglan las ventanas que se abrieron mientras la app estaba en segundo plano. */
+function repintar() {
+  const h = document.documentElement;
+  h.classList.add('repinta');
+  void h.offsetHeight;
+  requestAnimationFrame(() => requestAnimationFrame(() => h.classList.remove('repinta')));
+  document.querySelectorAll('.modal-bg').forEach((bg) => {
+    const m = bg.querySelector('.modal');
+    if (!m) { bg.remove(); return; }
+    m.style.animation = 'none'; m.style.transform = ''; m.style.opacity = ''; bg.style.backgroundColor = '';
+  });
+  for (const bm of liveMaps) {
+    try {
+      if (bm.perdido?.()) { bm.rehacer?.(); continue; }
+      bm.m.resize(); bm.m.triggerRepaint();
+    } catch { /* mapa ya cerrado */ }
+  }
+}
+window.busSevVuelve = () => { if (!appVisible) setVisible(true); else repintar(); };
 document.addEventListener('visibilitychange', () => setVisible(document.visibilityState === 'visible'));
 document.addEventListener('pause', () => setVisible(false));
 document.addEventListener('resume', () => setVisible(true));
@@ -676,6 +700,14 @@ function createMap(el, center, zoom) {
   }
   m.on('style.load', () => { estiloListo = true; for (const d of installers) install(d); });
   m.on('error', () => { /* teselas que no cargan sin cobertura: no es un fallo de la app */ });
+  /* Si Android le quita la gráfica al mapa (pasa al estar un rato en otra app), el mapa se queda gris:
+     se avisa a la pantalla para que lo vuelva a crear. */
+  let perdido = false;
+  const lienzo = m.getCanvas();
+  lienzo.addEventListener('webglcontextlost', (e) => { e.preventDefault(); perdido = true; }, false);
+  lienzo.addEventListener('webglcontextrestored', () => { perdido = false; try { m.resize(); m.triggerRepaint(); } catch { /* */ } }, false);
+  bm.perdido = () => { if (perdido) return true; try { return !!m.painter?.context?.gl?.isContextLost?.(); } catch { return false; } };
+  bm.rehacer = () => { setTimeout(() => { if (bm.perdido()) window.dispatchEvent(new CustomEvent('bussev-mapa-perdido', { detail: bm })); }, 1200); };
   liveMaps.add(bm);
   return bm;
 }
@@ -863,35 +895,52 @@ async function estimateBuses(codigo, tiempos) {
   }
   return out;
 }
+/* Autobuses de toda una línea con MUY pocas consultas.
+   TUSSAM da, para cada parada, los 2 próximos autobuses de cada línea (y a cuántos metros vienen).
+   Se empieza por la última parada: da los 2 autobuses más cercanos a ella. Luego se pregunta en la
+   parada que queda justo por detrás del más lejano de esos dos, que da los 2 siguientes, y así
+   hasta llegar al principio de la línea (o hasta que TUSSAM dé menos de 2: ya no hay más).
+   Una línea con 6 autobuses se resuelve con 3-4 consultas, una detrás de otra, en vez de 10-15 a la vez. */
+const porParadaTussam = 2;  // cuántos autobuses por línea da TUSSAM en cada parada
 async function liveBusesLine(linea, sentido, stops, alAvanzar) {
   if (!stops?.length) return { buses: [], ok: 0, total: 0 };
   const shape = getShape(linea.numero, sentido, stops);
-  const step = stops.length > 36 ? 5 : 4;
-  const ks = [];
-  for (let i = Math.min(step - 1, stops.length - 1); i < stops.length; i += step) ks.push(i);
-  if (ks[ks.length - 1] !== stops.length - 1) ks.push(stops.length - 1);
   const best = new Map();
-  let ok = 0, limited = false, avisoT = 0;
-  // Cada respuesta se dibuja en cuanto llega (no se espera a todas): los autobuses salen antes
-  const avanzar = () => { if (!alAvanzar) return; clearTimeout(avisoT); avisoT = setTimeout(() => alAvanzar([...best.values()], ok, ks.length), 120); };
-  const results = await Promise.allSettled(ks.map((i, n) => api(`/paradas/${encodeURIComponent(stops[i].codigo)}/tiempos`).then((v) => { procesar({ status: 'fulfilled', value: v }, n); avanzar(); return v; })));
-  results.forEach((r, n) => { if (r.status !== 'fulfilled' && r.reason?.status === 429) limited = true; });
-  clearTimeout(avisoT);
-  return { buses: [...best.values()], ok, total: ks.length, limited, porCalle: shape.porCalle };
-  function procesar(r, n) {
+  const MAX_CONSULTAS = 8;
+  let ok = 0, hechas = 0, limited = false, fallos = 0;
+  let k = stops.length - 1;
+  const consultadas = new Set();
+  while (k >= 0 && hechas < MAX_CONSULTAS) {
+    if (consultadas.has(k)) break;
+    consultadas.add(k);
+    hechas++;
+    let d;
+    try { d = await api(`/paradas/${encodeURIComponent(stops[k].codigo)}/tiempos`, { prioridad: 'baja', maxEdad: 25_000 }); } catch (e) {
+      if (e.status === 429) { limited = true; break; }
+      // parada sin datos: se prueba con la anterior (dos fallos seguidos: se para)
+      if (++fallos >= 2) break;
+      k -= 3; continue;
+    }
+    fallos = 0;
+    if (d.upstream_status === 'unavailable') { k -= 3; continue; }
     ok++;
-    const k = ks[n];
-    for (const t of r.value.tiempos || []) {
-      if (lineaFor(t.linea)?.numero !== linea.numero) continue;
-      if (t.sentido && t.sentido !== sentido) continue;
-      if (t.distancia_metros == null) continue;
+    const mias = (d.tiempos || []).filter((t) => lineaFor(t.linea)?.numero === linea.numero && (!t.sentido || t.sentido === sentido) && t.distancia_metros != null);
+    let masLejos = null;
+    for (const t of mias) {
       const w = locateOnShape(shape, k, t.distancia_metros);
       if (w.fuera) continue;
       const key = t.vehiculo != null ? `v${t.vehiculo}` : `${w.seg}-${Math.round(w.pos[0] * 2000)}-${Math.round(w.pos[1] * 2000)}`;
       const cur = best.get(key);
       if (!cur || t.distancia_metros < cur.dist) best.set(key, { ...w, shape, k, dist: t.distancia_metros, min: t.tiempo_minutos, vehiculo: t.vehiculo, destino: t.destino, hacia: stops[k].nombre });
+      if (!masLejos || w.seg < masLejos.seg) masLejos = w;
     }
+    alAvanzar?.([...best.values()]);
+    // Menos autobuses de los que da TUSSAM por parada: no hay más por detrás
+    if (mias.length < porParadaTussam || !masLejos) break;
+    // Siguiente: la parada justo por detrás del autobús más lejano (siempre más atrás que la actual)
+    k = Math.min(masLejos.seg - 1, k - 1);
   }
+  return { buses: [...best.values()], ok, total: hechas, limited, porCalle: shape.porCalle };
 }
 const busPopup = (b, label) => `<b>Línea ${esc(label)}</b> → ${esc(b.destino)}<br>${b.hacia ? `Llega a ${esc(b.hacia)} en ${b.min <= 0 ? 'nada' : b.min + ' min'}` : `${b.min <= 0 ? 'Llegando' : `Llega en ${b.min} min`} · a ${fmtDist(b.dist)}`}${b.vehiculo ? `<br><span class="muted">Autobús ${esc(b.vehiculo)}</span>` : ''}`;
 
@@ -920,17 +969,17 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
     onStatus?.(`${cargandoMini()} Buscando los autobuses de esta línea…`, true);
     spin(true);
     try {
-      const r = await liveBusesLine(l, sentido, stops, (parcial, hechas, total) => {
+      const r = await liveBusesLine(l, sentido, stops, (parcial) => {
         if (my !== seq) return;
         markers.sync(parcial.map((b) => ({ ...b, linea: l.numero, color: l.color })), l.numero, l.color, { parcial: true });
-        onStatus?.(`${cargandoMini()} Buscando autobuses… ${parcial.length ? `${parcial.length} encontrado${parcial.length === 1 ? '' : 's'} · ` : ''}${Math.round(hechas / total * 100)} %`, true);
+        onStatus?.(`${cargandoMini()} Buscando autobuses…${parcial.length ? ` ${parcial.length} encontrado${parcial.length === 1 ? '' : 's'}` : ''}`, true);
       });
       if (my !== seq) return;
       markers.sync(r.buses.map((b) => ({ ...b, linea: l.numero, color: l.color })), l.numero, l.color);
       onBuses?.(r.buses);
       onStatus?.(r.ok === 0
         ? (r.limited ? 'TUSSAM está limitando las consultas. Los autobuses aparecerán en un momento.' : 'No se ha podido saber dónde están los autobuses ahora.')
-        : `${r.buses.length ? `${r.buses.length} autobús${r.buses.length === 1 ? '' : 'es'} en este sentido` : 'Ahora mismo no hay autobuses en este sentido'} · ${fmtClock()}`);
+        : `${r.buses.length ? `${r.buses.length} ${r.buses.length === 1 ? 'autobús' : 'autobuses'} en este sentido` : 'Ahora mismo no hay autobuses en este sentido'} · ${fmtClock()}`);
     } finally { if (my === seq) spin(false); }
   }
   function clear() { stopLive?.(); stopLive = null; seq++; cur = null; markers.clear(); bm.source('bs-route', fc([])); bm.source('bs-route-stops', fc([])); }
@@ -1062,7 +1111,7 @@ function closeSheet() {
   mapState.bm?.source('bs-paths', fc([]));
   if (mapState.pin) { mapState.pin.remove(); mapState.pin = null; }
   $('#map-sheet').hidden = true;
-  if (mapState.linea) mapState.line.resume();
+  if (mapState.linea) mapState.line.resume(); else mapState.zona?.cargar(true);
 }
 function selectStop(p) {
   const bm = mapState.bm;
@@ -1070,6 +1119,7 @@ function selectStop(p) {
   mapState.sel = p;
   mapState.stopTimer?.();
   if (mapState.linea) mapState.line.stop();
+  mapState.zona?.ocultar();
   mapState.markers.clear();
   if (mapState.pin) mapState.pin.setLngLat(ll([p.latitud, p.longitud]));
   else mapState.pin = marker(bm, [p.latitud, p.longitud], stopPinEl(), null);
@@ -1113,7 +1163,11 @@ function selectStop(p) {
         bm.fit([[p.latitud, p.longitud], ...buses.slice(0, 4).map((b) => b.pos)], { padding: { top: 90, left: 40, right: 40, bottom: (mapState.sheetVisible || sheet.offsetHeight * 0.58) + 30 }, anim: true });
       }
     } catch (e) {
-      if (mapState.sel === p) $('#sh-board').innerHTML = `<div class="board-empty" style="border:0">${esc(e.message)}</div>`;
+      if (mapState.sel !== p) return;
+      if (e.status === 429) {
+        $('#sh-board').innerHTML = cargandoHTML('TUSSAM va saturado', 'Lo intentamos de nuevo en unos segundos…');
+        setTimeout(() => { if (mapState.sel === p) load(); }, Math.max(4000, window.BusSevBackend.pausa + 500));
+      } else $('#sh-board').innerHTML = `<div class="board-empty" style="border:0">${esc(e.message)}</div>`;
     } finally { spin(false); }
   }
   load();
@@ -1136,9 +1190,9 @@ function renderLineBar() {
       <div class="top">${badge(l.numero, l.color, { sm: true })}<b>${esc(l.nombre)}</b>
         <button class="x" type="button" id="ml-change" aria-label="Elegir otra línea">${ICON.route}</button>
         <button class="x" type="button" id="ml-close" aria-label="Quitar la línea del mapa">${ICON.close}</button></div>
-      ${sentidos.length > 1 ? `<div class="seg">${sentidos.map((s) => `<button type="button" data-ms="${s}" aria-pressed="${s === mapState.sentido}">${esc(same ? (s === 1 ? 'Ida' : 'Vuelta') : 'Hacia ' + lastName(s))}</button>`).join('')}</div>` : ''}
+      ${sentidos.length > 1 ? `<div class="seg">${sentidos.map((s) => `<button type="button" data-ms="${s}" aria-pressed="${s === mapState.sentido}" aria-label="${esc(same ? (s === 1 ? 'Ida' : 'Vuelta') : 'Hacia ' + lastName(s))}">${same ? `<span class="dst">${s === 1 ? 'Ida' : 'Vuelta'}</span>` : `<small>Hacia</small><span class="dst">${esc(lastName(s))}</span>`}</button>`).join('')}</div>` : ''}
       <div class="live" id="ml-live"></div></div>`;
-    $('#ml-close').onclick = () => { mapState.line.clear(); mapState.linea = null; renderLineBar(); };
+    $('#ml-close').onclick = () => { mapState.line.clear(); mapState.linea = null; renderLineBar(); mapState.zona?.cargar(true); };
     $('#ml-change').onclick = pickLineModal;
     bar.querySelectorAll('[data-ms]').forEach((b) => { b.onclick = () => { mapState.sentido = Number(b.dataset.ms); renderLineBar(); mapState.line.show(l, mapState.sentido); }; });
   });
@@ -1150,6 +1204,7 @@ async function chooseMapLine(numero) {
   if (location.hash !== '#mapa') { mapState.pending = l.numero; location.hash = 'mapa'; return; }
   const ruta = await getRuta(l.numero);
   mapState.linea = l;
+  mapState.zona?.ocultar();
   mapState.sentido = ruta[mapState.sentido]?.length ? mapState.sentido : Number(Object.keys(ruta)[0]);
   renderLineBar();
   mapState.line.show(l, mapState.sentido);
@@ -1159,6 +1214,84 @@ async function pickLineModal() {
   openModal(`<h2>¿Qué línea quieres ver?</h2><p class="help">Verás su recorrido y dónde están ahora sus autobuses.</p>
     <div class="line-grid">${lineas.map((l) => `<button class="line-pick" style="opacity:1" type="button" data-pl="${esc(l.numero)}" aria-label="Línea ${esc(l.numero)}: ${esc(l.nombre)}">${badge(l.numero, l.color)}</button>`).join('')}</div>`,
   (m, close) => { m.querySelectorAll('[data-pl]').forEach((b) => { b.onclick = () => { close(); closeSheet(); chooseMapLine(b.dataset.pl); }; }); });
+}
+let mapCompleto = false;
+function mapaPantallaCompleta(on) {
+  mapCompleto = on;
+  document.documentElement.classList.toggle('mapa-tab-completo', on);
+  document.documentElement.classList.toggle('con-mapa-completo', on);
+  const b = $('#btn-mapfull');
+  if (b) { b.innerHTML = on ? ICON.close : ICON.expand; b.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Ver el mapa en pantalla completa'); }
+  vibrar(10);
+  setTimeout(() => mapState.bm?.m.resize(), 60);
+}
+function pintarBotonBuses() {
+  const b = $('#btn-buses');
+  if (!b) return;
+  b.setAttribute('aria-pressed', String(!!settings.liveLines));
+  b.setAttribute('aria-label', settings.liveLines ? 'Ocultar los autobuses en directo' : 'Ver los autobuses en directo');
+}
+/* Autobuses en directo en la zona del mapa que estás mirando (sin elegir línea).
+   Para no saturar a TUSSAM se pregunta solo en 3-4 paradas repartidas por la pantalla
+   (cada una da los próximos autobuses de todas sus líneas), y solo con el mapa cerca y a la vista. */
+function zonaBuses(bm, markers, onStatus) {
+  let seq = 0, parar = null, deb = 0, ultima = null;
+  const ZOOM_MIN = 14.3, MAX_PARADAS = 4;
+  const puede = () => settings.liveLines && !mapState.sel && !mapState.linea && location.hash === '#mapa';
+  function ocultar() { seq++; clearTimeout(deb); markers.clear(); onStatus(''); }
+  function elegir(lista, centro) {
+    if (!lista.length) return [];
+    const d = (a, b) => (a.latitud - b[0]) ** 2 + ((a.longitud - b[1]) * 0.8) ** 2;
+    const out = [lista.reduce((m, p) => (d(p, centro) < d(m, centro) ? p : m))];
+    const n = bm.m.getZoom() >= 16 ? 3 : MAX_PARADAS;
+    while (out.length < n && out.length < lista.length) {
+      let mejor = null, md = -1;
+      for (const p of lista) { const x = Math.min(...out.map((q) => d(p, [q.latitud, q.longitud]))); if (x > md) { md = x; mejor = p; } }
+      if (!mejor || md < 1e-6) break;
+      out.push(mejor);
+    }
+    return out;
+  }
+  async function cargar(forzar = false) {
+    if (!puede()) { if (!mapState.sel && !mapState.linea) ocultar(); return; }
+    if (!appVisible) return;
+    const c = bm.m.getCenter();
+    if (bm.m.getZoom() < ZOOM_MIN) { seq++; markers.clear(); onStatus('🚌 Acércate un poco para ver los autobuses'); return; }
+    // Si apenas has movido el mapa y es reciente, no se vuelve a preguntar
+    if (!forzar && ultima && Date.now() - ultima.at < 20_000 && haversine([c.lat, c.lng], ultima.c) < 250) return;
+    const my = ++seq;
+    const b = bm.m.getBounds();
+    const lista = (await getParadas().catch(() => [])).filter((p) => b.contains([p.longitud, p.latitud]));
+    const elegidas = elegir(lista, [c.lat, c.lng]);
+    if (!elegidas.length) { markers.clear(); onStatus('No hay paradas en esta zona'); return; }
+    ultima = { at: Date.now(), c: [c.lat, c.lng] };
+    if (!markers.items.size) onStatus(`${cargandoMini()} Buscando autobuses en esta zona…`, true);
+    const vistos = new Map();
+    let ok = 0, limitado = false;
+    await Promise.all(elegidas.map((p) => api(`/paradas/${encodeURIComponent(p.codigo)}/tiempos`, { prioridad: 'baja', maxEdad: 25_000 })
+      .then(async (d) => {
+        ok++;
+        const buses = await estimateBuses(p.codigo, d.tiempos);
+        for (const x of buses) {
+          const k = x.vehiculo != null ? `v${x.vehiculo}` : `${x.linea}|${Math.round(x.pos[0] * 3000)}|${Math.round(x.pos[1] * 3000)}`;
+          const cur = vistos.get(k);
+          if (!cur || x.dist < cur.dist) vistos.set(k, x);
+        }
+        if (my === seq && puede()) markers.sync([...vistos.values()], null, null, { parcial: true });
+      }).catch((e) => { if (e.status === 429) limitado = true; })));
+    if (my !== seq || !puede()) return;
+    const todos = [...vistos.values()];
+    if (ok) markers.sync(todos);
+    onStatus(ok === 0
+      ? (limitado ? '🚌 TUSSAM va saturado: los autobuses saldrán en un momento' : '🚌 No se ha podido consultar a TUSSAM')
+      : `🚌 ${todos.length ? `${todos.length} ${todos.length === 1 ? 'autobús' : 'autobuses'} cerca` : 'Ningún autobús cerca ahora'} · ${fmtClock()}`);
+  }
+  bm.m.on('moveend', () => { clearTimeout(deb); if (puede()) deb = setTimeout(() => cargar(false), 1300); });
+  return {
+    cargar, ocultar,
+    empezar() { parar?.(); parar = autoRefresh(() => cargar(true), { min: REFRESH_LINE_MIN }); cargar(true); },
+    parar() { parar?.(); parar = null; clearTimeout(deb); seq++; },
+  };
 }
 views.mapa = (el) => {
   if (!mapState.bm) {
@@ -1177,19 +1310,31 @@ views.mapa = (el) => {
       } catch (err) { toast(geoErrorText(err)); }
     };
     if (store.get('geoOk', false)) getPosition().then((pos) => { mapState.me = marker(bm, pos, meEl(), null, 'center'); bm.m.jumpTo({ center: ll(pos), zoom: 16 }); }).catch(() => null);
+    mapState.zona = zonaBuses(bm, new MarkerSet(bm), (t, html) => { const n = $('#map-zona'); if (!n) return; n.hidden = !t; if (html) n.innerHTML = t; else n.textContent = t || ''; });
     renderLineBar();
   } else {
     if (mapState.sel) { mapState.reload?.(); mapState.stopTimer?.(); mapState.stopTimer = autoRefresh(() => mapState.reload?.()); } else if (mapState.linea) mapState.line.resume();
   }
+  mapState.zona?.empezar();
+  pintarBotonBuses();
+  $('#btn-buses', el).onclick = () => {
+    settings.liveLines = !settings.liveLines; saveSettings(); vibrar(12);
+    pintarBotonBuses();
+    toast(settings.liveLines ? 'Autobuses en directo activados' : 'Autobuses en directo desactivados');
+    if (settings.liveLines) { if (mapState.linea && !mapState.sel) { mapState.line.stop(); mapState.line.resume(); } mapState.zona?.cargar(true); }
+    else { mapState.zona?.ocultar(); if (mapState.linea) { mapState.line.stop(); mapState.lineMarkers.clear(); const n = $('#ml-live'); if (n) n.textContent = 'Autobuses en directo desactivados (botón 🚌 del mapa).'; } }
+  };
+  $('#btn-mapfull', el).onclick = () => mapaPantallaCompleta(!mapCompleto);
   if (mapState.pending) { const n = mapState.pending; mapState.pending = null; chooseMapLine(n); }
   requestAnimationFrame(() => mapState.bm?.m.resize());
   return {
     back: () => {
       if (mapState.sel) { if (!mapState.sheetCollapsed?.()) mapState.sheetTo?.(2); else closeSheet(); return true; }
-      if (mapState.linea) { mapState.line.clear(); mapState.linea = null; renderLineBar(); return true; }
+      if (mapCompleto) { mapaPantallaCompleta(false); return true; }
+      if (mapState.linea) { mapState.line.clear(); mapState.linea = null; renderLineBar(); mapState.zona?.cargar(true); return true; }
       return false;
     },
-    cleanup: () => { mapState.stopTimer?.(); mapState.stopTimer = null; mapState.line?.stop(); },
+    cleanup: () => { mapState.stopTimer?.(); mapState.stopTimer = null; mapState.line?.stop(); mapState.zona?.parar(); if (mapCompleto) mapaPantallaCompleta(false); },
     refresh: () => (mapState.sel ? mapState.reload?.() : mapState.line?.live()),
   };
 };
@@ -1322,7 +1467,7 @@ const lineasParada = {
   },
 };
 views.parada = (el, codigo) => {
-  let stop = null, bm = null, markers = null, info = null, dead = false, first = true, ultimo = null, lineasAqui = [], completo = false;
+  let stop = null, bm = null, markers = null, info = null, dead = false, first = true, ultimo = null, lineasAqui = [], completo = false, reintento = 0;
   /* Mapa a pantalla completa (el botón Atrás también lo cierra) */
   function pantallaCompleta(on) {
     const w = $('#p-mapwrap', el);
@@ -1446,12 +1591,15 @@ views.parada = (el, codigo) => {
       await pintar(d);
     } catch (e) {
       if (dead) return;
-      if (!quiet) $('#p-board', el).innerHTML = `<div class="board-empty">${esc(e.message)}</div>`; else toast(e.message);
+      // TUSSAM pide esperar: se reintenta solo en cuanto deje (sin que tengas que tocar nada)
+      if (e.status === 429) { clearTimeout(reintento); reintento = setTimeout(() => { if (!dead) load(true); }, Math.max(4000, window.BusSevBackend.pausa + 500)); }
+      if (!quiet || !ultimo) $('#p-board', el).innerHTML = e.status === 429 ? cargandoHTML('TUSSAM va saturado', 'Lo intentamos de nuevo en unos segundos…') : `<div class="board-empty">${esc(e.message)}</div>`;
+      else if (e.status !== 429) toast(e.message);
     } finally { spin(false); }
   }
   init();
   return {
-    cleanup: () => { dead = true; stop?.(); markers?.clear(); bm?.remove(); document.documentElement.classList.remove('con-mapa-completo'); },
+    cleanup: () => { dead = true; clearTimeout(reintento); stop?.(); markers?.clear(); bm?.remove(); document.documentElement.classList.remove('con-mapa-completo'); },
     refresh: () => load(),
     back: () => { if (completo) { pantallaCompleta(false); return true; } return false; },
   };
@@ -1551,7 +1699,7 @@ views.ajustes = (el) => {
       <h2 class="section-title">Tiempos y avisos</h2>
       <div class="set-group"><h3>Actualizar los tiempos</h3>${segBtns('refresh', [[30, 'Cada 30 s'], [60, 'Cada minuto'], [0, 'Al pulsar ⟳']], settings.refresh)}
         <p>Cuanto menos a menudo, menos batería y datos. Con la app en segundo plano nunca se actualiza.</p></div>
-      <div class="set-group">${sw('liveLines', settings.liveLines, 'Autobuses en directo en las líneas', 'Muestra dónde va cada autobús de la línea. Hace más consultas a TUSSAM.')}</div>
+      <div class="set-group">${sw('liveLines', settings.liveLines, 'Autobuses en directo en el mapa', 'Muestra dónde va cada autobús (en las líneas y en la zona del mapa que miras). También se activa con el botón 🚌 del mapa.')}</div>
       <div class="set-group"><h3>Revisar al abrir la app</h3>${segBtns('revisarCada', [[0, 'Nunca'], [1, 'Cada hora'], [3, 'Cada 3 h'], [6, 'Cada 6 h']], settings.revisarCada)}
         <p>Comprueba el saldo y la caducidad de tus tarjetas guardadas al abrir la app, como mucho con esta frecuencia, y te avisa si el saldo está bajo.</p></div>
       <div class="set-group"><h3>Avisos de TUSSAM (desvíos, obras, horarios especiales)</h3>${segBtns('avisosTussam', [['mias', 'De mis líneas'], ['todas', 'Todos'], ['no', 'No avisar']], settings.avisosTussam)}
@@ -1747,6 +1895,17 @@ document.querySelectorAll('.tabbar a').forEach((a) => {
   a.addEventListener('click', (e) => { if (location.hash === `#${a.dataset.tab}`) { e.preventDefault(); clearSearch(); route(); } });
 });
 window.addEventListener('hashchange', route);
-window.addEventListener('online', () => toast('Vuelves a tener conexión'));
-window.addEventListener('offline', () => toast('Sin conexión: los tiempos no se actualizarán'));
+/* El móvil le quitó la gráfica a un mapa y no se la ha devuelto: se vuelve a crear la pantalla */
+window.addEventListener('bussev-mapa-perdido', (e) => {
+  const bm = e.detail;
+  if (bm === mapState.bm) {
+    const linea = mapState.linea;
+    try { mapState.stopTimer?.(); mapState.zona?.parar(); mapState.line?.stop(); } catch { /* */ }
+    try { bm.remove(); } catch { /* */ }
+    const cont = $('#map-all'); if (cont) cont.innerHTML = '';
+    const sh = $('#map-sheet'); if (sh) sh.hidden = true;
+    Object.assign(mapState, { bm: null, me: null, sel: null, pin: null, markers: null, lineMarkers: null, line: null, stopTimer: null, reload: null, linea: null, zona: null, pending: linea ? linea.numero : null });
+  } else { try { bm.remove(); } catch { /* */ } }
+  route();
+});
 

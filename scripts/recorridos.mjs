@@ -7,7 +7,7 @@ import vm from 'node:vm';
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
 const MAX_WAYPOINTS = 80;
-const PAUSA_MS = 1100; // el servidor público pide como mucho 1 consulta por segundo
+const PAUSA_MS = Number(process.env.OSRM_PAUSA_MS ?? 1100); // el servidor público pide como mucho 1 consulta por segundo
 
 const ctx = { window: {} };
 vm.runInNewContext(fs.readFileSync(`${ROOT}www/data.js`, 'utf8'), ctx);
@@ -30,28 +30,60 @@ const hav = (a, b) => {
 };
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function tramos(stops) {
-  // Devuelve, para cada par de paradas seguidas, la lista de puntos [lat, lon] por calle.
+/* Puntos de cada tramo (pares de paradas seguidas) a partir de los «legs» de OSRM */
+const puntosDe = (legs) => legs.map((leg) => {
+  const pts = [];
+  for (const st of leg.steps) for (const [lon, lat] of st.geometry.coordinates) {
+    const q = [lat, lon];
+    const last = pts[pts.length - 1];
+    if (!last || last[0] !== q[0] || last[1] !== q[1]) pts.push(q);
+  }
+  return { pts, distancia: leg.distance };
+});
+
+/* 1) «Ajuste al trazado» (map matching): OSRM mira, para cada parada, todas las calles a menos de
+   35 m y elige la combinación que forma el recorrido más lógico. Así no se pega una parada a la
+   calzada del otro sentido de una avenida (lo que provocaba vueltas a la manzana que el bus no da). */
+async function porAjuste(stops) {
   const coords = stops.map((s) => `${s.lon.toFixed(6)},${s.lat.toFixed(6)}`).join(';');
-  const url = `${OSRM}/route/v1/driving/${coords}?overview=false&steps=true&geometries=geojson&continue_straight=true`;
+  const radios = stops.map(() => 35).join(';');
+  const url = `${OSRM}/match/v1/driving/${coords}?overview=false&steps=true&geometries=geojson&gaps=ignore&tidy=false&radiuses=${radios}`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'BusSev (app personal)' }, signal: AbortSignal.timeout(12000) });
+  if (!res.ok) throw new Error(`OSRM match ${res.status}`);
+  const j = await res.json();
+  // Solo vale si ha encajado TODAS las paradas en un único recorrido continuo
+  if (j.code !== 'Ok' || j.matchings?.length !== 1 || !j.tracepoints?.every(Boolean)) throw new Error(j.code !== 'Ok' ? `OSRM match ${j.code}` : 'no encajan todas las paradas');
+  const legs = j.matchings[0].legs;
+  if (legs.length !== stops.length - 1) throw new Error('OSRM match: tramos incompletos');
+  return puntosDe(legs);
+}
+/* 2) Si el ajuste no sale, ruta normal parada a parada, llegando por el lado de la acera (derecha) */
+async function porRuta(stops) {
+  const coords = stops.map((s) => `${s.lon.toFixed(6)},${s.lat.toFixed(6)}`).join(';');
+  const lados = stops.map(() => 'curb').join(';');
+  const url = `${OSRM}/route/v1/driving/${coords}?overview=false&steps=true&geometries=geojson&continue_straight=true&approaches=${lados}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'BusSev (app personal)' }, signal: AbortSignal.timeout(9000) });
   if (!res.ok) throw new Error(`OSRM ${res.status}`);
   const j = await res.json();
   if (j.code !== 'Ok' || !j.routes?.[0]) throw new Error(`OSRM ${j.code}`);
-  return j.routes[0].legs.map((leg) => {
-    const pts = [];
-    for (const st of leg.steps) for (const [lon, lat] of st.geometry.coordinates) {
-      const q = [lat, lon];
-      const last = pts[pts.length - 1];
-      if (!last || last[0] !== q[0] || last[1] !== q[1]) pts.push(q);
-    }
-    return { pts, distancia: leg.distance };
-  });
+  return puntosDe(j.routes[0].legs);
 }
+async function tramos(stops) {
+  try { return await porAjuste(stops); } catch (e) {
+    process.stdout.write(`   (ajuste no disponible: ${e.message}; se usa la ruta)\n`);
+    await esperar(PAUSA_MS);
+    return porRuta(stops);
+  }
+}
+
+/* ¿Este tramo da un rodeo que el autobús no da? (vuelta a la manzana, cambio de calzada…)
+   Entre dos paradas seguidas el bus va casi recto: si el camino calculado es mucho más largo
+   que la distancia en línea recta, se usa la recta. */
+export const esRodeo = (distancia, recta) => distancia > Math.max(recta * 2, recta + 350);
 
 const salida = {};
 let ok = 0, rectos = 0;
-for (const [k, lista] of grupos) {
+if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
   const stops = lista.sort((a, b) => a.orden - b.orden);
   if (stops.length < 2) continue;
   try {
@@ -67,7 +99,7 @@ for (const [k, lista] of grupos) {
       const a = [stops[i].lat, stops[i].lon], b = [stops[i + 1].lat, stops[i + 1].lon];
       const recta = hav(a, b);
       // Si el coche da un rodeo que el autobús no da (carriles bus, calles cortadas), usamos la recta.
-      const usarRecta = !leg.pts.length || leg.distancia > Math.max(recta * 2.5, recta + 700);
+      const usarRecta = !leg.pts.length || esRodeo(leg.distancia, recta);
       if (usarRecta) rectos++;
       const tramo = usarRecta ? [b] : [...leg.pts.slice(1, -1), b];
       for (const q of tramo) pts.push([Math.round(q[0] * 1e5), Math.round(q[1] * 1e5)].map((v) => v / 1e5));
@@ -89,6 +121,6 @@ for (const [k, lista] of grupos) {
   }
 }
 
-fs.writeFileSync(`${ROOT}www/recorridos.js`,
+if (!process.env.BUSSEV_SOLO_FUNCIONES) fs.writeFileSync(`${ROOT}www/recorridos.js`,
   `/* Recorridos por calle calculados con OSRM (© OpenStreetMap). ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n`);
-console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rectos} tramos en recta.`);
+if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rectos} tramos en recta.`);

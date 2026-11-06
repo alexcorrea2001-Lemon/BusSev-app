@@ -258,7 +258,7 @@ views.ruta = (el) => {
     // próximo autobús en cada parada de subida
     ops.forEach((o, n) => o.tramos.forEach((t, ti) => {
       const num = t.k.split('|')[0];
-      api(`/paradas/${encodeURIComponent(t.desde)}/tiempos`).then((d) => {
+      api(`/paradas/${encodeURIComponent(t.desde)}/tiempos`, { prioridad: 'baja' }).then((d) => {
         const b = (d.tiempos || []).filter((x) => lineaFor(x.linea)?.numero === num).sort((a, c) => a.tiempo_minutos - c.tiempo_minutos)[0];
         const span = res.querySelector(`[data-next="${n}-${ti}"]`);
         if (span) span.textContent = b ? (b.tiempo_minutos <= 0 ? 'llegando' : `próximo en ${b.tiempo_minutos} min`) : 'sin autobuses ahora';
