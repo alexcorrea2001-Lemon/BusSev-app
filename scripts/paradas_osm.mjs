@@ -6,9 +6,10 @@
 
 const OVERPASS = (process.env.OVERPASS_URL || [
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass-api.de/api/interpreter',          // 2ª vuelta al principal (sus 502 suelen ser momentáneos)
 ].join(',')).split(',');
 // Zona de TUSSAM (Sevilla y alrededores)
 const BBOX = '37.28,-6.10,37.47,-5.86';
@@ -31,16 +32,20 @@ const numeros = (tags) => ['ref', 'ref:tussam', 'ref:TUSSAM', 'local_ref', 'ref:
   .map((k) => String(tags?.[k] || '')).join(';').split(/[;,/ ]+/).map((x) => x.replace(/^0+/, '')).filter((x) => /^\d{1,5}$/.test(x));
 
 async function descargar() {
-  const q = `[out:json][timeout:40];(node["highway"="bus_stop"](${BBOX});node["public_transport"="platform"]["bus"="yes"](${BBOX}););out body;`;
+  const q = `[out:json][timeout:25];(node["highway"="bus_stop"](${BBOX});node["public_transport"="platform"]["bus"="yes"](${BBOX}););out body qt;`;
   let ultimo;
   for (const url of OVERPASS) {
     try {
-      const r = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: q }), headers: { 'User-Agent': 'BusSev (app personal, no comercial)' }, signal: AbortSignal.timeout(45_000) });
+      const r = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: q }), headers: { 'User-Agent': 'BusSev (app personal, no comercial)' }, signal: AbortSignal.timeout(30_000) });
       if (!r.ok) throw new Error(`Overpass ${r.status}`);
       const j = await r.json();
       if (!Array.isArray(j.elements)) throw new Error('Overpass: respuesta rara');
       return j.elements.filter((e) => e.type === 'node' && e.lat && e.lon);
-    } catch (e) { ultimo = new Error(`${new URL(url).hostname}: ${e.message}`); console.log(`  OpenStreetMap: ${ultimo.message}; se prueba otro servidor`); }
+    } catch (e) {
+      ultimo = new Error(`${new URL(url).hostname}: ${e.message}`);
+      console.log(`  OpenStreetMap: ${ultimo.message}; se prueba otro servidor`);
+      await new Promise((r) => setTimeout(r, Number(process.env.OSM_PAUSA ?? 5000)));
+    }
   }
   throw ultimo;
 }

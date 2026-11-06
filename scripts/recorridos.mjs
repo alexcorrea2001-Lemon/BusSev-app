@@ -32,14 +32,29 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES && !process.env.FORZAR_RECORRIDOS) {
 }
 
 /* 1) Posición real de cada parada según OpenStreetMap (las de TUSSAM a veces caen 50-100 m fuera de la calle) */
-let osm = new Map();
+let osm = new Map(), osmReutilizado = false;
 if (!process.env.BUSSEV_SOLO_FUNCIONES) {
   try {
     const { paradasOSM } = await import('./paradas_osm.mjs');   // si falta el archivo, se sigue sin él
     const r = await paradasOSM(D.paradas);
     osm = r.ajustes;
     console.log(`OpenStreetMap: ${r.nodos} paradas de bus en la zona; colocadas ${r.porNumero} por número y ${r.porNombre} por nombre (de ${D.paradas.length}).`);
-  } catch (e) { console.log(`OpenStreetMap no disponible (${e.message}): se usan las coordenadas de TUSSAM.`); }
+  } catch (e) {
+    // OpenStreetMap no contesta: se reutilizan las posiciones que se consiguieron la última vez (van guardadas en recorridos.js)
+    try {
+      const c2 = { window: {} };
+      vm.runInNewContext(fs.readFileSync(`${ROOT}www/recorridos.js`, 'utf8'), c2);
+      const prev = c2.window.BUSSEV_PARADAS_OSM || {};
+      for (const [cod, pos] of Object.entries(prev)) {
+        const p = paradas.get(cod);
+        if (p && Array.isArray(pos) && Math.abs(pos[0] - p.latitud) < 0.005 && Math.abs(pos[1] - p.longitud) < 0.005) osm.set(cod, pos);
+      }
+    } catch { /* no había */ }
+    console.log(osm.size
+      ? `OpenStreetMap no disponible (${e.message}): se reutilizan ${osm.size} paradas colocadas la vez anterior.`
+      : `OpenStreetMap no disponible (${e.message}): se usan las coordenadas de TUSSAM.`);
+    osmReutilizado = osm.size > 0;
+  }
   for (const [c, pos] of osm) { const p = paradas.get(c); if (p) { p.latitud = pos[0]; p.longitud = pos[1]; } }
 }
 
@@ -247,5 +262,6 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
 if (!process.env.BUSSEV_SOLO_FUNCIONES) fs.writeFileSync(`${ROOT}www/recorridos.js`,
   `/* Recorridos por calle calculados con OSRM (© OpenStreetMap). ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n` +
   `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...[...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)]), ...osm]))};\n` +
-  `window.BUSSEV_RECORRIDOS_FIRMA="${FIRMA}";window.BUSSEV_RECORRIDOS_COMPLETO=${!rapidas && !sinCalcular && !fallidas && osm.size > 0};\n`);
+  `/* Posición de las paradas según OpenStreetMap (© colaboradores de OpenStreetMap, ODbL); se reutiliza si un día no contesta */\nwindow.BUSSEV_PARADAS_OSM=${JSON.stringify(Object.fromEntries(osm))};\n` +
+  `window.BUSSEV_RECORRIDOS_FIRMA="${FIRMA}";window.BUSSEV_RECORRIDOS_COMPLETO=${!rapidas && !sinCalcular && !fallidas && osm.size > 0 && !osmReutilizado};\n`);
 if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle; ${rapidas} líneas en modo rápido, ${sinCalcular} sin calcular.`);
