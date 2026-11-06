@@ -4,16 +4,32 @@
 // Antes coloca cada parada en su sitio exacto según OpenStreetMap (paradas_osm.mjs).
 import fs from 'node:fs';
 import vm from 'node:vm';
+import crypto from 'node:crypto';
 
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
 const MAX_WAYPOINTS = 80;
+let MAX_AJUSTE = 10;          // el servidor público de OSRM solo encaja trazados de pocas paradas de una vez
+const VERSION_CALCULO = 4;    // súbelo si cambia la forma de calcular, para que se repita aunque los datos sean iguales
 const PAUSA_MS = Number(process.env.OSRM_PAUSA_MS ?? 1100); // el servidor público pide como mucho 1 consulta por segundo
 
 const ctx = { window: {} };
 vm.runInNewContext(fs.readFileSync(`${ROOT}www/data.js`, 'utf8'), ctx);
 const D = ctx.window.BUSSEV_DATA;
 const paradas = new Map(D.paradas.map((p) => [p.codigo, p]));
+
+/* 0) Si ya se calcularon (y salieron completos) para estos mismos datos, no se repite: compila más rápido
+      y no se carga a los servidores públicos de mapas. */
+const FIRMA = crypto.createHash('sha1').update(JSON.stringify([VERSION_CALCULO, D.recorridos, D.paradas.map((p) => [p.codigo, p.latitud, p.longitud])])).digest('hex').slice(0, 16);
+if (!process.env.BUSSEV_SOLO_FUNCIONES && !process.env.FORZAR_RECORRIDOS) {
+  try {
+    const previo = fs.readFileSync(`${ROOT}www/recorridos.js`, 'utf8');
+    if (previo.includes(`BUSSEV_RECORRIDOS_FIRMA="${FIRMA}"`) && previo.includes('BUSSEV_RECORRIDOS_COMPLETO=true')) {
+      console.log('Los recorridos ya están calculados para estos datos: no hace falta repetirlos.');
+      process.exit(0);
+    }
+  } catch { /* no hay previos */ }
+}
 
 /* 1) Posición real de cada parada según OpenStreetMap (las de TUSSAM a veces caen 50-100 m fuera de la calle) */
 let osm = new Map();
@@ -69,7 +85,7 @@ async function porAjuste(stops) {
     if (!res.ok) {
       ultimo = new Error(`OSRM match ${res.status}${j.code ? ` ${j.code}` : ''}${j.message ? `: ${j.message}` : ''}`);
       if (avisoAjuste++ < 3) process.stdout.write(`   (detalle: ${ultimo.message})\n`);
-      if (res.status === 400 && extra) { sinRadios = true; await esperar(PAUSA_MS); continue; }
+      if (res.status === 400 && extra && !/TooBig|NoMatch/.test(ultimo.message)) { sinRadios = true; await esperar(PAUSA_MS); continue; }
       throw ultimo;
     }
     // Solo vale si ha encajado TODAS las paradas en un único recorrido continuo
@@ -92,12 +108,27 @@ async function porRuta(stops, acera = false) {
   if (j.code !== 'Ok' || !j.routes?.[0]) throw new Error(`OSRM ${j.code}`);
   return puntosDe(j.routes[0].legs);
 }
-async function tramos(stops) {
-  try { return await porAjuste(stops); } catch (e) {
-    process.stdout.write(`   (ajuste no disponible: ${e.message}; se usa la ruta)\n`);
-    await esperar(PAUSA_MS);
-    return porRuta(stops);
+/* Encaja una línea entera: en trozos de pocas paradas (lo que admite el servidor público), solapados una parada.
+   Si un trozo no se puede encajar, ese trozo va por ruta normal. En modo rápido (poco tiempo), todo por ruta. */
+async function tramos(stops, rapido = false) {
+  const legs = [];
+  if (rapido) {
+    for (let i = 0; i < stops.length - 1; i += MAX_WAYPOINTS - 1) { legs.push(...await porRuta(stops.slice(i, i + MAX_WAYPOINTS))); await esperar(PAUSA_MS); }
+    return legs;
   }
+  for (let i = 0; i < stops.length - 1;) {
+    const trozo = stops.slice(i, i + MAX_AJUSTE);
+    try { legs.push(...await porAjuste(trozo)); }
+    catch (e) {
+      if (/TooBig/.test(e.message) && MAX_AJUSTE > 4) { MAX_AJUSTE = Math.max(4, Math.floor(MAX_AJUSTE * 0.7)); await esperar(PAUSA_MS); continue; }   // trozos más pequeños
+      if (avisoAjuste++ < 6) process.stdout.write(`   (ajuste no disponible en un trozo: ${e.message}; ese trozo va por ruta)\n`);
+      await esperar(PAUSA_MS);
+      legs.push(...await porRuta(trozo));
+    }
+    await esperar(PAUSA_MS);
+    i += trozo.length - 1;
+  }
+  return legs;
 }
 
 /* ¿Este tramo da un rodeo que el autobús no da? (vuelta a la manzana, cambio de calzada…)
@@ -127,6 +158,10 @@ const MAX_REHECHOS = Number(process.env.OSRM_MAX_REHECHOS ?? 150);
 // GitHub corta este paso a los 10 min: se deja margen para guardar siempre lo calculado
 const INICIO = Date.now();
 const quedaTiempo = (min) => Date.now() - INICIO < min * 60_000;
+const LIMITE_REHACER = Number(process.env.LIMITE_REHACER_MIN ?? 5);     // recalcular tramos raros
+const LIMITE_COMPLETO = Number(process.env.LIMITE_COMPLETO_MIN ?? 6.5); // encaje fino; después, modo rápido
+const LIMITE_TOTAL = Number(process.env.LIMITE_TOTAL_MIN ?? 8.5);       // después, se guarda lo que haya
+let rapidas = 0, sinCalcular = 0, fallidas = 0;
 
 const salida = {};
 const ajustes = new Map();   // parada -> { dist, pos } (posición en la calle)
@@ -134,14 +169,12 @@ let ok = 0, rectos = 0;
 if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
   const stops = lista.sort((a, b) => a.orden - b.orden);
   if (stops.length < 2) continue;
-  if (!quedaTiempo(7)) { process.stdout.write(`… sin tiempo: ${k} queda en línea recta\n`); continue; }
+  // Con poco tiempo, el resto de líneas se calcula en modo rápido (una consulta por línea): siempre por calle
+  const rapido = !quedaTiempo(LIMITE_COMPLETO);
+  if (rapido) rapidas++;
+  if (!quedaTiempo(LIMITE_TOTAL)) { process.stdout.write(`… sin tiempo: ${k} queda sin calcular\n`); sinCalcular++; continue; }
   try {
-    const legs = [];
-    for (let i = 0; i < stops.length - 1; i += MAX_WAYPOINTS - 1) {
-      const trozo = stops.slice(i, i + MAX_WAYPOINTS);
-      legs.push(...await tramos(trozo));
-      await esperar(PAUSA_MS);
-    }
+    const legs = await tramos(stops, rapido);
     // Si el coche da un rodeo que el autobús no da (carriles bus, calles cortadas), ese tramo va en recta.
     // Tramo raro (rodeo o vuelta a la manzana): se recalcula solo ese tramo llegando por el lado de la acera;
     // si sigue raro, ese tramo va en línea recta entre las dos paradas.
@@ -155,7 +188,7 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
       if (!tramoRaro(legs[i], a, b)) { recto.push(false); continue; }
       const opciones = [legs[i]];
       for (const acera of [false, true]) {
-        if (rehechos >= MAX_REHECHOS || !quedaTiempo(5.5)) break;
+        if (rapido || rehechos >= MAX_REHECHOS || !quedaTiempo(LIMITE_REHACER)) break;
         rehechos++;
         try {
           await esperar(PAUSA_MS);
@@ -206,12 +239,13 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
     ok++;
     process.stdout.write(`✓ ${k} (${stops.length} paradas)\n`);
   } catch (e) {
-    process.stdout.write(`✗ ${k}: ${e.message}\n`);
+    process.stdout.write(`✗ ${k}: ${e.message}\n`); fallidas++;
     await esperar(PAUSA_MS);
   }
 }
 
 if (!process.env.BUSSEV_SOLO_FUNCIONES) fs.writeFileSync(`${ROOT}www/recorridos.js`,
   `/* Recorridos por calle calculados con OSRM (© OpenStreetMap). ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n` +
-  `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...[...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)]), ...osm]))};\n`);
-if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle.`);
+  `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...[...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)]), ...osm]))};\n` +
+  `window.BUSSEV_RECORRIDOS_FIRMA="${FIRMA}";window.BUSSEV_RECORRIDOS_COMPLETO=${!rapidas && !sinCalcular && !fallidas && osm.size > 0};\n`);
+if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle; ${rapidas} líneas en modo rápido, ${sinCalcular} sin calcular.`);
