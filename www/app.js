@@ -1620,7 +1620,7 @@ views.parada = (el, codigo) => {
     const elegidas = lineasParada.get(codigo);
     const tiempos = elegidas.length ? filtrarLineas(d.tiempos, { lineas: elegidas }) : (d.tiempos || []);
     setHTML($('#p-board', el), `${boardHTML(tiempos, status, { codigo, filtrado: elegidas.length > 0 })}
-        <div class="meta-row" style="padding-top:10px;border-top:1px solid var(--line)">${status === 'ok' ? freshnessPill(d) : '<span class="pill stale">TUSSAM no responde</span>'}<span>Actualizado <span class="p-hora"></span></span>${settings.voz ? `<button class="link-btn" type="button" data-speak="${esc(codigo)}">🔊 Escuchar</button>` : ''}</div>
+        <div class="meta-row" style="padding-top:10px;border-top:1px solid var(--line)">${status === 'ok' ? freshnessPill(d) : '<span class="pill stale">TUSSAM no responde</span>'}<span>Actualizado <span class="p-hora"></span></span>${d?.via ? `<span class="muted">· ${d.via === 'api' ? 'vía API de TUSSAM' : 'vía tu servidor'}</span>` : ''}${settings.voz ? `<button class="link-btn" type="button" data-speak="${esc(codigo)}">🔊 Escuchar</button>` : ''}</div>
         <p class="small muted" style="margin:0;padding:0 14px 12px">Toca un autobús para que te avise cuando esté llegando.</p>`);
       const hora = $('#p-board .p-hora', el); if (hora) hora.textContent = fmtClock(d.__at);
       if (bm) {

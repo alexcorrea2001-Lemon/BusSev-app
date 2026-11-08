@@ -143,7 +143,7 @@
   }
   const enPausa = () => Date.now() < pausaHasta;
 
-  function normalizar(json, codigo) {
+  function normalizar(json, codigo, via = 'api') {
     // La API nueva (api.tussam.es) devuelve el objeto directo; la antigua lo envolvía en "result".
     let r = json && (json.result ?? json);
     if (Array.isArray(r)) r = r.find((x) => x && typeof x === 'object') || {};
@@ -173,6 +173,7 @@
     const pos = r.posicion || {};
     return {
       parada: codigo,
+      via,   // de dónde salieron estos tiempos: 'api' (api.tussam.es) o 'servidor' (tu servidor)
       nombre: r.descripcion?.texto || p.nombre || '',
       latitud: pos.latitudE6 ? pos.latitudE6 / 1e6 : (p.latitud ?? null),
       longitud: pos.longitudE6 ? pos.longitudE6 / 1e6 : (p.longitud ?? null),
@@ -202,7 +203,7 @@
       if (/403|cloudflare|just a moment/i.test(String(j?.error || ''))) servidorMalHasta = Date.now() + 30 * 60_000;
       throw new HttpError(502, j?.error || 'Tu servidor no tiene datos');
     }
-    const d = normalizar(j.tussam, codigo);
+    const d = normalizar(j.tussam, codigo, 'servidor');
     return j.antiguo ? { ...d, stale: true, cached_at: new Date(j.at).toISOString() } : d;
   }
   async function pedirJSON(url, ms = 8000) {
