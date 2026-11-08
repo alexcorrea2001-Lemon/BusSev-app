@@ -115,6 +115,20 @@ jobs:
             "$VERSION" "$NUMERO" "$(date -u +%Y-%m-%d)" "${{ github.repository }}" > www/version.js
           cat www/version.js
 
+      # Credenciales de la API de TUSSAM: viven en un Secret del repositorio (nunca en el código).
+      # Aquí se escribe www/secrets.js al vuelo, antes de meter la app en el APK.
+      - name: Credenciales de TUSSAM
+        if: steps.seguir.outputs.si == 'si'
+        env:
+          TUSSAM_SECRETS_JS: ${{ secrets.TUSSAM_SECRETS_JS }}
+        run: |
+          if [ -z "$TUSSAM_SECRETS_JS" ]; then
+            echo "::error::Falta el secreto TUSSAM_SECRETS_JS (Settings → Secrets and variables → Actions). Mira el README."
+            exit 1
+          fi
+          printf '%s\n' "$TUSSAM_SECRETS_JS" > www/secrets.js
+          echo "www/secrets.js creado para el APK."
+
       - name: Copiar la app al proyecto Android
         if: steps.seguir.outputs.si == 'si'
         run: npx cap sync android
