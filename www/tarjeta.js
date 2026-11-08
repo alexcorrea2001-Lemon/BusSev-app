@@ -65,6 +65,21 @@ const tarjeta = {
   /* Consulta a TUSSAM. visible=true abre la página para pasar la comprobación de Cloudflare. */
   async consultar(num, { visible = false } = {}) {
     let html, diag = {};
+    // 00) API de TUSSAM (la que usa su app móvil): sin web, sin Cloudflare, con saldo, título y caducidad.
+    //     «visible» pide la comprobación de Cloudflare de la web, así que en ese caso se salta.
+    if (!visible && window.BusSevBackend?.estadoTarjeta) {
+      try {
+        const res = this.desdeApi(await window.BusSevBackend.estadoTarjeta(num), num);
+        res.diag = { via: 'API de TUSSAM', numero: num };
+        return res;
+      } catch (e) {
+        // El número no existe: no tiene sentido probar las demás vías
+        if (e?.status === 400 || e?.status === 404) {
+          return { ok: false, saldo: null, titulo: null, tipo: null, caducidad: null, sinCaducidad: false, caducaEl: null, extra: [], sinSaldoWeb: false, numeroOk: false, error: 'TUSSAM no reconoce esta tarjeta. Comprueba el número.', fecha: Date.now(), diag: { via: 'API de TUSSAM', numero: num, api: e.message } };
+        }
+        diag.api = e?.message || 'no se pudo consultar la API de TUSSAM';
+      }
+    }
     // 0) Tu propio servidor del saldo, si lo has configurado (es lo más fiable: lo lee desde un servidor, no desde el móvil).
     if (settings.saldoURL && !visible) {
       try {
@@ -86,7 +101,7 @@ const tarjeta = {
       try {
         const r = await window.Capacitor.nativePromise('TussamWeb', 'consultar', { numero: num, visible });
         html = r.html;
-        diag = { servidor: diag.servidor, directa: diag.directa, motivo: r.motivo || '', via: r.via || '', boton: !!r.boton, estado: r.estado || '', texto: String(r.diag || '').slice(0, 700), url: String(r.url || '').slice(0, 200), red: String(r.red || '').slice(0, 200) };
+        diag = { api: diag.api, servidor: diag.servidor, directa: diag.directa, motivo: r.motivo || '', via: r.via || '', boton: !!r.boton, estado: r.estado || '', texto: String(r.diag || '').slice(0, 700), url: String(r.url || '').slice(0, 200), red: String(r.red || '').slice(0, 200) };
       } catch (e) {
         const code = e?.code || (/CLOUDFLARE/.test(String(e?.message)) ? 'CLOUDFLARE' : '');
         throw Object.assign(new Error(e?.message || 'No se ha podido consultar.'), { code });
@@ -99,6 +114,28 @@ const tarjeta = {
     const res = this.interpretar(html, num);
     res.diag = { ...diag, numero: num, html: String(html || '').replace(/\s+/g, ' ').slice(0, 400) };
     return res;
+  },
+  /* Convierte la respuesta de la API de TUSSAM (estadoTarjeta) al mismo formato que «interpretar» */
+  desdeApi(j, num) {
+    const titulo = j?.nombreTitulo ? String(j.nombreTitulo).trim() : null;
+    const saldo = j?.saldoMonedero != null ? Math.round(Number(j.saldoMonedero)) / 1000 : null;   // viene en milésimas de euro
+    const cadTxt = [j?.caducidad, j?.finValidez].find((x) => x && String(x).trim()) || null;
+    const sinCad = !!cadTxt && /(^|\D)31[/-]12[/-]2063\b/.test(String(cadTxt));                    // TussApp lo trata como «no caduca»
+    const f = !sinCad && cadTxt ? String(cadTxt).match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/) : null;
+    const caducaEl = f ? new Date(Number(f[3].length === 2 ? '20' + f[3] : f[3]), Number(f[2]) - 1, Number(f[1])).getTime() : null;
+    const extra = [];
+    if (j?.saldoViajes != null) extra.push(['Viajes en la tarjeta', String(j.saldoViajes)]);
+    if (j?.ultimaOperacion) extra.push(['Última operación', String(j.ultimaOperacion)]);
+    if (j?.inicioValidez) extra.push(['Válida desde', String(j.inicioValidez)]);
+    if (j?.inicioAmpliacion || j?.finAmpliacion) extra.push(['Ampliación', [j.inicioAmpliacion, j.finAmpliacion].filter(Boolean).join(' – ')]);
+    const ok = j?.numeroSerie != null || saldo != null || !!titulo;
+    return {
+      ok, saldo, titulo, tipo: tipoDeTitulo(titulo)?.id || null,
+      caducidad: sinCad ? null : cadTxt, sinCaducidad: sinCad, caducaEl, extra,
+      sinSaldoWeb: ok && saldo == null && !titulo, numeroOk: true,
+      error: ok ? null : 'TUSSAM no reconoce esta tarjeta. Comprueba el número.',
+      fecha: Date.now(),
+    };
   },
   /* Lee el bloque «cardStatus»: <label><b>Saldo monedero:</b></label><span class="cardStatusValue">… */
   interpretar(html, num) {
@@ -184,13 +221,22 @@ const haceCuanto = (t) => {
   if (m < 1440) return `hace ${Math.round(m / 60)} h`;
   return `el ${new Date(t).toLocaleDateString('es-ES')}`;
 };
+/* De dónde salió el saldo, en texto corto para enseñarlo en la tarjeta */
+const viaLegible = (v) => {
+  if (v === 'API de TUSSAM') return 'vía API de TUSSAM';
+  if (v === 'tu servidor') return 'vía tu servidor';
+  if (v === 'directa' || v === 'DIRECTO') return 'vía web de TUSSAM';
+  if (v === 'manual') return 'apuntado a mano';
+  if (v) return 'vía web de TUSSAM';
+  return '';
+};
 
 /* Guarda el resultado de una consulta en la tarjeta y lanza los avisos */
 function aplicarConsulta(num, res) {
   const c = tarjeta.get(num);
   if (!c || !res?.ok) return;
   tarjeta.update(num, {
-    ultimo: { saldo: res.saldo, tipo: res.tipo, titulo: res.titulo, caducidad: res.caducidad, caducaEl: res.caducaEl, sinCaducidad: res.sinCaducidad, sinSaldoWeb: !!res.sinSaldoWeb, fecha: res.fecha },
+    ultimo: { saldo: res.saldo, tipo: res.tipo, titulo: res.titulo, caducidad: res.caducidad, caducaEl: res.caducaEl, sinCaducidad: res.sinCaducidad, sinSaldoWeb: !!res.sinSaldoWeb, fecha: res.fecha, via: res.manual ? 'manual' : (res.diag?.via || null) },
     // si TUSSAM dice el tipo, se quita el que se hubiera elegido a mano
     ...(res.tipo ? { tipo: '' } : {}),
   });
@@ -314,7 +360,7 @@ views.tarjeta = (el) => {
     const precio = infoViaje?.precio || 0;
     const viajes = precio && u?.saldo != null ? Math.max(0, Math.floor(u.saldo / precio + 1e-9)) : null;
     const bajo = c?.avisoSaldo?.on && u?.saldo != null && u.saldo < Number(c.avisoSaldo.importe || 0);
-    return `<div class="detail-head" style="margin-bottom:4px"><button class="back-btn" type="button" id="t-back" aria-label="Volver">${ICON.back}</button><div class="grow"><h2>${esc(c?.name || 'Tu tarjeta')}</h2><p>${u?.fecha ? `Actualizada ${haceCuanto(u.fecha)}` : 'Sin consultar todavía'}</p></div>
+    return `<div class="detail-head" style="margin-bottom:4px"><button class="back-btn" type="button" id="t-back" aria-label="Volver">${ICON.back}</button><div class="grow"><h2>${esc(c?.name || 'Tu tarjeta')}</h2><p>${u?.fecha ? `Actualizada ${haceCuanto(u.fecha)}${viaLegible(res?.diag?.via || u?.via) ? ` · ${viaLegible(res?.diag?.via || u?.via)}` : ''}` : 'Sin consultar todavía'}</p></div>
       ${c ? `<button class="btn-mas" type="button" id="t-menu" aria-label="Más opciones">${ICON.mas}</button>` : ''}</div>
       ${tcardHTML(num, c, res?.ok ? res : null)}
       ${loading ? cargandoHTML('Consultando tu tarjeta en TUSSAM…', 'Puede tardar unos segundos.') : ''}
@@ -331,6 +377,7 @@ views.tarjeta = (el) => {
           `Número: ${res.diag?.numero || num}`,
           `Motivo: ${res.diag?.motivo || 'respuesta sin datos'} · Estado: ${res.diag?.estado || '-'} · Vía: ${res.diag?.via || '-'} · Botón «Seleccionar»: ${res.diag?.boton ? 'sí' : 'no encontrado'}`,
           `Dirección: ${res.diag?.url || '-'} · Red: ${res.diag?.red || 'sin errores'}`,
+          `API de TUSSAM: ${res.diag?.api || 'sin respuesta'}`,
           `Tu servidor del saldo: ${settings.saldoURL ? (res.diag?.servidor || 'sin respuesta') : 'no configurado'}`,
           `Consulta rápida: ${res.diag?.directa || '-'}`,
           `Página: ${res.diag?.texto || '(vacía)'}`,

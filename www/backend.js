@@ -40,14 +40,14 @@
   /* Cuando caducan los datos oficiales incluidos en la app (o falta una línea),
      se piden las paradas de la línea a TUSSAM en directo y se guardan 7 días. */
   const caducados = () => !!D.caduca && Date.now() > Date.parse(D.caduca + 'T23:59:59');
-  const fhTussam = () => { const d = new Date(); const z = (n) => String(n).padStart(2, '0'); return `${z(d.getDate())}-${z(d.getMonth() + 1)}-${d.getFullYear()}T${z(d.getHours())}%3A${z(d.getMinutes())}%3A${z(d.getSeconds())}`; };
+  const fhTussam = () => { const d = new Date(); const z = (n) => String(n).padStart(2, '0'); return `${z(d.getDate())}-${z(d.getMonth() + 1)}-${d.getFullYear()}T${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`; };
   const leerCache = (k) => { try { const v = JSON.parse(localStorage.getItem('bussev.live.' + k) || 'null'); return v && Date.now() - v.at < 7 * 86400_000 ? v.data : null; } catch { return null; } };
   const guardarCache = (k, data) => { try { localStorage.setItem('bussev.live.' + k, JSON.stringify({ at: Date.now(), data })); } catch { /* sin espacio */ } };
   let lineasLiveP = null;
   async function lineasLive() {
     const c = leerCache('lineas'); if (c) return c;
-    lineasLiveP ??= fetch(`${ORIGEN}/API/infotus-ui/lineas/${fhTussam()}`, { headers: { Accept: 'application/json' } }).then((r) => r.json()).then((j) => {
-      const l = (j?.result?.lineasDisponibles || []).map((x) => ({ id: x.linea, numero: String(x.labelLinea || '') })).filter((x) => x.id && /^[A-Za-z0-9]{1,8}$/.test(x.numero));
+    lineasLiveP ??= fetchApi(`/INFOTUS/api/v2/lineas?fechaConcreta=${encodeURIComponent(fhTussam())}`).then((r) => { if (!r.ok) throw new HttpError(502, `TUSSAM respondió ${r.status}`); return r.json(); }).then((j) => {
+      const l = ((j?.result ?? j)?.lineasDisponibles || []).map((x) => ({ id: x.linea, numero: String(x.labelLinea || '') })).filter((x) => x.id && /^[A-Za-z0-9]{1,8}$/.test(x.numero));
       if (l.length) guardarCache('lineas', l);
       return l;
     }).finally(() => { lineasLiveP = null; });
@@ -59,8 +59,8 @@
     if (!info) return null;
     const out = [];
     for (const sentido of [1, 2]) {
-      const j = await fetch(`${ORIGEN}/API/infotus-ui/nodosLinea/${encodeURIComponent(info.id)}/${sentido}/${fhTussam()}`, { headers: { Accept: 'application/json' } }).then((r) => r.json()).catch(() => null);
-      (Array.isArray(j?.result) ? j.result : []).forEach((n, orden) => {
+      const j = await fetchApi(`/INFOTUS/api/v2/nodosLinea/${encodeURIComponent(info.id)}?sentido=${sentido}&fecha=${encodeURIComponent(fhTussam())}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      (Array.isArray(j) ? j : Array.isArray(j?.result) ? j.result : []).forEach((n, orden) => {
         const codigo = String(n?.codigo ?? '');
         const lat = (n?.posicion?.latitudE6 || 0) / 1e6, lon = (n?.posicion?.longitudE6 || 0) / 1e6;
         if (!/^\d{1,7}$/.test(codigo) || !lat || !lon) return;
@@ -144,7 +144,8 @@
   const enPausa = () => Date.now() < pausaHasta;
 
   function normalizar(json, codigo) {
-    let r = json && json.result;
+    // La API nueva (api.tussam.es) devuelve el objeto directo; la antigua lo envolvía en "result".
+    let r = json && (json.result ?? json);
     if (Array.isArray(r)) r = r.find((x) => x && typeof x === 'object') || {};
     if (!r || typeof r !== 'object') r = {};
     const tiempos = [];
@@ -153,10 +154,13 @@
       const s = sentidosEn.get(`${codigo}|${label}`) || [];
       for (const e of l.estimaciones || []) {
         if (e.segundos == null) continue;
+        // -1800 = "más de 30 min" en la API de TUSSAM; otros negativos = sin dato
+        if (e.segundos < 0 && e.segundos !== -1800) continue;
+        const seg = e.segundos === -1800 ? 31 * 60 : e.segundos;
         tiempos.push({
           linea: label,
           color: l.color || lineaByNum.get(label)?.color || '#000000',
-          tiempo_minutos: Math.floor(e.segundos / 60),
+          tiempo_minutos: Math.floor(seg / 60),
           destino: e.destino?.texto || '',
           distancia_metros: e.distancia ?? null,
           vehiculo: e.vehiculo ?? null,
@@ -266,6 +270,70 @@
     }
     throw ultimo;
   }
+  /* ---------- API oficial de la app móvil de TUSSAM (OAuth) ---------- */
+  const API_TUSSAM = 'https://api.tussam.es';
+  const URL_TOKEN = 'https://auth.tussam.es/auth/realms/TUSSAM-SSO/protocol/openid-connect/token';
+  // Las credenciales van fuera del repositorio, en www/secrets.js (ignorado por git).
+  // Ese fichero sí se incluye en el APK. Ver www/secrets.example.js para su forma.
+  const CRED = (typeof window !== 'undefined' && window.BUSSEV_TUSSAM) || {};
+  const OAUTH_CLIENT_ID = CRED.clientId || '';
+  const OAUTH_CLIENT_SECRET = CRED.clientSecret || '';
+  const OAUTH_USER = CRED.user || '';
+  const OAUTH_PASS = CRED.pass || '';
+  let accessToken = null, refreshToken = null, tokenP = null;
+
+  function pedirToken(signal) {
+    if (!OAUTH_CLIENT_SECRET) return Promise.reject(new HttpError(500, 'Faltan las credenciales de TUSSAM (crea www/secrets.js)'));
+    tokenP ??= (async () => {
+      const conRefresh = !!refreshToken;
+      const params = conRefresh
+        ? { grant_type: 'refresh_token', client_id: OAUTH_CLIENT_ID, client_secret: OAUTH_CLIENT_SECRET, refresh_token: refreshToken }
+        : { grant_type: 'password', client_id: OAUTH_CLIENT_ID, client_secret: OAUTH_CLIENT_SECRET, username: OAUTH_USER, password: OAUTH_PASS };
+      const r = await fetch(URL_TOKEN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+        body: new URLSearchParams(params).toString(),
+        signal,
+      });
+      if (!r.ok) {
+        accessToken = null; refreshToken = null;
+        if (conRefresh) return pedirToken(signal);   // el refresh caducó: login completo
+        throw new HttpError(502, `Auth TUSSAM ${r.status}`);
+      }
+      const j = await r.json();
+      accessToken = j.access_token || null;
+      refreshToken = j.refresh_token || null;
+      if (!accessToken) throw new HttpError(502, 'TUSSAM no devolvió token');
+    })().finally(() => { tokenP = null; });
+    return tokenP;
+  }
+
+  async function fetchApi(ruta, signal) {
+    if (!accessToken) await pedirToken(signal);
+    const llamar = () => fetch(`${API_TUSSAM}${ruta}`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` }, signal,
+    });
+    let res = await llamar();
+    if (res.status === 401) { await pedirToken(signal); res = await llamar(); }
+    return res;
+  }
+
+  /* Estado de una tarjeta (saldo, título, caducidad) directo de la API de TUSSAM */
+  async function estadoTarjeta(numero) {
+    const num = String(Number(String(numero).replace(/\D/g, '')));
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const r = await fetchApi(`/INFOTUS/api/v2/estadoTarjeta/${encodeURIComponent(num)}`, ctrl.signal);
+      if (!r.ok) {
+        let msg = '';
+        try { msg = String((await r.json())?.mensaje || ''); } catch { /* sin cuerpo */ }
+        throw new HttpError(r.status, msg || `TUSSAM respondió ${r.status}`);
+      }
+      return await r.json();
+    } finally { clearTimeout(t); }
+  }
+
   async function pedirUnaVez(codigo, prioridad) {
     // TUSSAM ha pedido esperar un buen rato: no te dejamos mirando «Cargando…»; se avisa ya
     // (la pantalla enseña lo último que había y lo vuelve a intentar sola cuando toque)
@@ -276,9 +344,7 @@
       const t = setTimeout(() => ctrl.abort(), 12000);
       let res;
       try {
-        res = await fetch(`${ORIGEN}/API/infotus-ui/tiempos/${encodeURIComponent(codigo)}`, {
-          headers: { Accept: 'application/json', Referer: `${ORIGEN}/` }, signal: ctrl.signal,
-        });
+        res = await fetchApi(`/INFOTUS/api/v2/tiempos/${encodeURIComponent(codigo)}`, ctrl.signal);
       } finally { clearTimeout(t); }
       if (res.status === 429) {
         let ra = parseInt(res.headers.get('Retry-After') || '', 10);
@@ -371,5 +437,5 @@
     throw new HttpError(404);
   }
 
-  window.BusSevBackend = { get, HttpError, cancelarFondo, get pausa() { return Math.max(0, pausaHasta - Date.now()); }, get viaServidor() { return usarServidor(); }, generado: D.generado, caduca: D.caduca, caducados };
+  window.BusSevBackend = { get, estadoTarjeta, HttpError, cancelarFondo, get pausa() { return Math.max(0, pausaHasta - Date.now()); }, get viaServidor() { return usarServidor(); }, generado: D.generado, caduca: D.caduca, caducados };
 })();
