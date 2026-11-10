@@ -12,14 +12,16 @@ import android.os.Build;
 import android.view.View;
 import android.widget.RemoteViews;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-/** Widget de pantalla de inicio: enseña una parada favorita y sus próximos autobuses. */
+/** Widget de inicio: una o varias paradas favoritas con sus próximos autobuses. */
 public class BusSevWidgetProvider extends AppWidgetProvider {
     static final String PREFS = "bussev_widget";
     static final String ACTION_REFRESH = "es.bussev.app.WIDGET_REFRESH";
@@ -55,18 +57,45 @@ public class BusSevWidgetProvider extends AppWidgetProvider {
         }
     }
 
-    /** La llama el plugin cuando la app guarda nuevas favoritas/credenciales. */
     static void actualizarTodos(Context context) {
         AppWidgetManager mgr = AppWidgetManager.getInstance(context);
         int[] ids = mgr.getAppWidgetIds(new ComponentName(context, BusSevWidgetProvider.class));
         for (int id : ids) actualizar(context, mgr, id);
     }
 
+    /** Paradas elegidas para un widget: [codigo, nombre]. Soporta el formato antiguo de una sola parada. */
+    static List<String[]> leerStops(SharedPreferences p, int id) {
+        List<String[]> out = new ArrayList<>();
+        String arrJson = p.getString("stops_" + id, null);
+        if (arrJson != null) {
+            try {
+                JSONArray a = new JSONArray(arrJson);
+                for (int i = 0; i < a.length(); i++) {
+                    JSONObject o = a.optJSONObject(i);
+                    if (o == null) continue;
+                    String c = o.optString("codigo", "");
+                    if (c.isEmpty()) continue;
+                    out.add(new String[]{ c, o.optString("nombre", "Parada " + c) });
+                }
+            } catch (Exception e) { /* */ }
+        }
+        if (out.isEmpty()) {
+            String one = p.getString("stop_" + id, null);
+            if (one != null) {
+                try {
+                    JSONObject o = new JSONObject(one);
+                    String c = o.optString("codigo", "");
+                    if (!c.isEmpty()) out.add(new String[]{ c, o.optString("nombre", "Parada " + c) });
+                } catch (Exception e) { /* */ }
+            }
+        }
+        return out;
+    }
+
     static void actualizar(final Context context, final AppWidgetManager mgr, final int widgetId) {
         final SharedPreferences p = prefs(context);
-        String stopJson = p.getString("stop_" + widgetId, null);
+        final List<String[]> stops = leerStops(p, widgetId);
 
-        // PendingIntents (abrir app + refrescar) reutilizables
         Intent open = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         if (open == null) open = new Intent(context, MainActivity.class);
         final PendingIntent piOpen = PendingIntent.getActivity(context, widgetId, open, piFlags());
@@ -75,7 +104,7 @@ public class BusSevWidgetProvider extends AppWidgetProvider {
                 .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
         final PendingIntent piRef = PendingIntent.getBroadcast(context, widgetId, ref, piFlags());
 
-        if (stopJson == null) {
+        if (stops.isEmpty()) {
             RemoteViews v = base(context, piOpen, piRef);
             v.setTextViewText(R.id.w_stop, "Elige una parada");
             v.setTextViewText(R.id.w_updated, "Toca para abrir BusSev");
@@ -84,59 +113,71 @@ public class BusSevWidgetProvider extends AppWidgetProvider {
             return;
         }
 
-        String cod, nom;
-        try {
-            JSONObject s = new JSONObject(stopJson);
-            cod = s.optString("codigo", "");
-            nom = s.optString("nombre", "Parada " + cod);
-        } catch (Exception e) { cod = ""; nom = "Parada"; }
+        final boolean varias = stops.size() > 1;
+        final String cabecera = varias ? "Mis paradas" : stops.get(0)[1];
 
-        // Estado "Actualizando…"
         RemoteViews cargando = base(context, piOpen, piRef);
-        cargando.setTextViewText(R.id.w_stop, nom);
+        cargando.setTextViewText(R.id.w_stop, cabecera);
         cargando.setTextViewText(R.id.w_updated, "Actualizando…");
         mgr.updateAppWidget(widgetId, cargando);
 
-        final String fcod = cod, fnom = nom;
         new Thread(new Runnable() {
             public void run() {
-                String err = null;
-                List<TussamTiempos.Llegada> list = null;
+                RemoteViews v = base(context, piOpen, piRef);
+                v.setTextViewText(R.id.w_stop, cabecera);
                 try {
                     String tok = TussamTiempos.token(p);
                     if (tok == null) throw new Exception("sin token");
-                    list = TussamTiempos.tiempos(fcod, tok);
-                } catch (Exception e) {
-                    err = "Sin conexión";
-                }
-                RemoteViews v = base(context, piOpen, piRef);
-                v.setTextViewText(R.id.w_stop, fnom);
-                if (err != null || list == null || list.isEmpty()) {
-                    for (int r = 0; r < 3; r++) v.setViewVisibility(ROW_BOX[r], View.GONE);
-                    v.setTextViewText(R.id.w_updated, err != null ? err : "Sin autobuses ahora mismo");
-                } else {
-                    int n = Math.min(3, list.size());
-                    for (int r = 0; r < 3; r++) {
-                        if (r < n) {
-                            TussamTiempos.Llegada a = list.get(r);
+                    if (varias) {
+                        int n = Math.min(3, stops.size());
+                        for (int r = 0; r < 3; r++) {
+                            if (r >= n) { v.setViewVisibility(ROW_BOX[r], View.GONE); continue; }
+                            String[] s = stops.get(r);
+                            List<TussamTiempos.Llegada> list = null;
+                            try { list = TussamTiempos.tiempos(s[0], tok); } catch (Exception ig) { /* */ }
                             v.setViewVisibility(ROW_BOX[r], View.VISIBLE);
-                            v.setTextViewText(ROW_LINE[r], a.linea);
-                            try {
-                                if (a.color != null && a.color.startsWith("#")) {
-                                    v.setTextColor(ROW_LINE[r], Color.parseColor(a.color));
-                                }
-                            } catch (Exception ignore) { }
-                            v.setTextViewText(ROW_DEST[r], a.destino);
-                            v.setTextViewText(ROW_MIN[r], a.minutos <= 0 ? "ya" : (a.minutos + " min"));
+                            v.setTextViewText(ROW_DEST[r], s[1]);
+                            if (list != null && !list.isEmpty()) {
+                                TussamTiempos.Llegada a = list.get(0);
+                                v.setTextViewText(ROW_LINE[r], a.linea);
+                                color(v, ROW_LINE[r], a.color);
+                                v.setTextViewText(ROW_MIN[r], a.minutos <= 0 ? "ya" : (a.minutos + " min"));
+                            } else {
+                                v.setTextViewText(ROW_LINE[r], "");
+                                v.setTextViewText(ROW_MIN[r], "—");
+                            }
+                        }
+                        v.setTextViewText(R.id.w_updated, "Actualizado a las " + hora());
+                    } else {
+                        List<TussamTiempos.Llegada> list = TussamTiempos.tiempos(stops.get(0)[0], tok);
+                        if (list == null || list.isEmpty()) {
+                            for (int r = 0; r < 3; r++) v.setViewVisibility(ROW_BOX[r], View.GONE);
+                            v.setTextViewText(R.id.w_updated, "Sin autobuses ahora mismo");
                         } else {
-                            v.setViewVisibility(ROW_BOX[r], View.GONE);
+                            int n = Math.min(3, list.size());
+                            for (int r = 0; r < 3; r++) {
+                                if (r >= n) { v.setViewVisibility(ROW_BOX[r], View.GONE); continue; }
+                                TussamTiempos.Llegada a = list.get(r);
+                                v.setViewVisibility(ROW_BOX[r], View.VISIBLE);
+                                v.setTextViewText(ROW_LINE[r], a.linea);
+                                color(v, ROW_LINE[r], a.color);
+                                v.setTextViewText(ROW_DEST[r], a.destino);
+                                v.setTextViewText(ROW_MIN[r], a.minutos <= 0 ? "ya" : (a.minutos + " min"));
+                            }
+                            v.setTextViewText(R.id.w_updated, "Actualizado a las " + hora());
                         }
                     }
-                    v.setTextViewText(R.id.w_updated, "Actualizado a las " + hora());
+                } catch (Exception e) {
+                    for (int r = 0; r < 3; r++) v.setViewVisibility(ROW_BOX[r], View.GONE);
+                    v.setTextViewText(R.id.w_updated, "Sin conexión");
                 }
                 mgr.updateAppWidget(widgetId, v);
             }
         }).start();
+    }
+
+    static void color(RemoteViews v, int id, String hex) {
+        try { if (hex != null && hex.startsWith("#")) v.setTextColor(id, Color.parseColor(hex)); } catch (Exception ignore) { /* */ }
     }
 
     static RemoteViews base(Context context, PendingIntent piOpen, PendingIntent piRef) {
@@ -153,7 +194,7 @@ public class BusSevWidgetProvider extends AppWidgetProvider {
     @Override
     public void onDeleted(Context context, int[] ids) {
         SharedPreferences.Editor e = prefs(context).edit();
-        for (int id : ids) e.remove("stop_" + id);
+        for (int id : ids) { e.remove("stop_" + id); e.remove("stops_" + id); }
         e.apply();
     }
 }
