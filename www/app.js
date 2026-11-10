@@ -120,6 +120,26 @@ function tarjetasBajasHTML() {
     }).join('')}</div>`;
   } catch { return ''; }
 }
+/* Tarjetas que caducan pronto (o ya caducadas): se avisan también en Favoritas, como el saldo bajo. */
+function tarjetasCaducanHTML() {
+  try {
+    if (typeof tarjeta === 'undefined' || !tarjeta.list) return '';
+    const hoy = Date.now();
+    const cad = tarjeta.list().filter((c) => {
+      const a = c.avisoCaducidad, u = c.ultimo;
+      if (!a?.on || !u?.caducaEl || u.sinCaducidad) return false;
+      const dias = Math.max(...((a.dias && a.dias.length) ? a.dias : [15]));
+      return u.caducaEl - hoy <= dias * 86400000;
+    });
+    if (!cad.length) return '';
+    return `<div class="set-group sb-group"><h3>⚠️ Caducidad</h3>${cad.map((c) => {
+      const nombre = esc(c.name || `Tarjeta ${tarjeta.fmt(c.num)}`);
+      const d = Math.ceil((c.ultimo.caducaEl - hoy) / 86400000);
+      const txt = d < 0 ? 'Ya caducada · renuévala' : d === 0 ? 'Caduca hoy · renuévala' : `Caduca en ${d} día${d === 1 ? '' : 's'} · renuévala`;
+      return `<a class="row-flat sb-row" href="#tarjeta"><span class="sb-punto"></span><div style="flex:1;min-width:0"><b>${nombre}</b><p class="help">${txt}</p></div>${ICON.chev}</a>`;
+    }).join('')}</div>`;
+  } catch { return ''; }
+}
 /* Vehículos de fiesta (opcional en Ajustes): cada autobús elige uno al azar, siempre el mismo para ese autobús */
 const VEHICULOS_FIESTA = { semanasanta: { n: 8, nombre: 'pasos de Semana Santa', clase: 'veh-paso' }, feria: { n: 8, nombre: 'coches de caballos', clase: 'veh-coche' }, navidad: { n: 11, nombre: 'carrozas', clase: 'veh-carroza' } };
 const vehiculoFiesta = () => (settings.vehiculosFiesta ? VEHICULOS_FIESTA[tematicaActiva()] || null : null);
@@ -1211,6 +1231,7 @@ views.favoritas = (el) => {
       setHTML($('#fav-cards', el), cards);
       const nb = $('#fav-noche', el); if (nb) setHTML(nb, nocturnasHTML());
       const sb = $('#fav-saldo', el); if (sb) setHTML(sb, tarjetasBajasHTML());
+      const cd = $('#fav-caduca', el); if (cd) setHTML(cd, tarjetasCaducanHTML());
       const ob = $('#fav-offline', el); if (ob) setHTML(ob, offlineHTML());
       $('#fav-upd', el).textContent = results ? `Actualizado a las ${fmtClock()} · ${refreshNote()}` : '';
       return true;
@@ -1224,6 +1245,7 @@ views.favoritas = (el) => {
       <div id="fav-noche">${nocturnasHTML()}</div>
       <div id="fav-avisos"></div>
       <div id="fav-saldo">${tarjetasBajasHTML()}</div>
+      <div id="fav-caduca">${tarjetasCaducanHTML()}</div>
       <div class="stack" id="fav-cards">${cards}</div>
       <p class="updated" id="fav-upd">${results ? `Actualizado a las ${fmtClock()} · ${refreshNote()}` : ''}</p>
       <p class="small muted" style="text-align:center;margin:0">Toca un autobús para que te avise cuando esté llegando.</p></div>`;

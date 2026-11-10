@@ -9,7 +9,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -18,22 +17,13 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.Set;
-
-/** Pantalla al añadir el widget: elegir una o varias paradas favoritas (estilo BusSev). */
+/** Pantalla al añadir el widget: elegir una parada favorita (estilo BusSev). */
 public class BusSevWidgetConfig extends Activity {
     int widgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
 
-    static final int ACCENT = Color.parseColor("#E5303C");
     static final int BG = Color.parseColor("#141416");
     static final int CARD = Color.parseColor("#26272D");
     static final int SUB = Color.parseColor("#9B9DA7");
-
-    final Set<String> sel = new LinkedHashSet<>();
-    final ArrayList<String> codigos = new ArrayList<>();
-    final ArrayList<String> nombres = new ArrayList<>();
     float d;
 
     @Override
@@ -62,7 +52,7 @@ public class BusSevWidgetConfig extends Activity {
         root.addView(title);
 
         TextView sub = new TextView(this);
-        sub.setText("Elige las paradas que verás en el widget");
+        sub.setText("Elige la parada del widget");
         sub.setTextColor(SUB);
         sub.setTextSize(14);
         sub.setPadding(0, dp(4), 0, dp(14));
@@ -89,76 +79,56 @@ public class BusSevWidgetConfig extends Activity {
             if (f == null) continue;
             final String codigo = f.optString("codigo", "");
             final String nombre = f.optString("nombre", "Parada " + codigo);
-            codigos.add(codigo);
-            nombres.add(nombre);
-
-            final TextView row = new TextView(this);
-            row.setTextColor(Color.WHITE);
-            row.setTextSize(16);
-            row.setPadding(dp(16), dp(14), dp(16), dp(14));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.bottomMargin = dp(10);
-            row.setLayoutParams(lp);
-            pintarFila(row, nombre, codigo, false);
-            row.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    boolean now = !sel.contains(codigo);
-                    if (now) sel.add(codigo); else sel.remove(codigo);
-                    pintarFila(row, nombre, codigo, now);
-                }
-            });
-            list.addView(row);
+            list.addView(fila(nombre, codigo));
         }
         sc.addView(list);
-        sc.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         root.addView(sc);
-
-        final TextView save = new TextView(this);
-        save.setText("Guardar");
-        save.setTextColor(Color.WHITE);
-        save.setTextSize(17);
-        save.setTypeface(save.getTypeface(), Typeface.BOLD);
-        save.setGravity(Gravity.CENTER);
-        save.setPadding(dp(16), dp(16), dp(16), dp(16));
-        GradientDrawable sg = new GradientDrawable();
-        sg.setColor(ACCENT);
-        sg.setCornerRadius(dp(16));
-        save.setBackground(sg);
-        LinearLayout.LayoutParams savep = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        savep.topMargin = dp(8);
-        save.setLayoutParams(savep);
-        save.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { guardar(); }
-        });
-        root.addView(save);
 
         setContentView(root);
     }
 
-    void pintarFila(TextView row, String nombre, String codigo, boolean on) {
-        row.setText((on ? "✓  " : "") + nombre + "   ·   nº " + codigo);
+    /** Tarjeta de parada: nombre arriba (grande) y "Parada nº X" debajo (gris). Tocar = elegir. */
+    LinearLayout fila(final String nombre, final String codigo) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(13), dp(16), dp(13));
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(14));
-        g.setColor(on ? ACCENT : CARD);
-        row.setBackground(g);
+        g.setColor(CARD);
+        box.setBackground(g);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(10);
+        box.setLayoutParams(lp);
+
+        TextView nom = new TextView(this);
+        nom.setText(nombre);
+        nom.setTextColor(Color.WHITE);
+        nom.setTextSize(16);
+        nom.setTypeface(nom.getTypeface(), Typeface.BOLD);
+        box.addView(nom);
+
+        TextView num = new TextView(this);
+        num.setText("Parada nº " + codigo);
+        num.setTextColor(SUB);
+        num.setTextSize(13);
+        num.setPadding(0, dp(2), 0, 0);
+        box.addView(num);
+
+        box.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { elegir(codigo, nombre); }
+        });
+        return box;
     }
 
-    void guardar() {
-        if (sel.isEmpty()) { finish(); return; }
+    void elegir(String codigo, String nombre) {
         SharedPreferences p = getSharedPreferences(BusSevWidgetProvider.PREFS, Context.MODE_PRIVATE);
-        JSONArray arr = new JSONArray();
-        for (String c : sel) {
-            int i = codigos.indexOf(c);
-            try {
-                JSONObject o = new JSONObject();
-                o.put("codigo", c);
-                o.put("nombre", i >= 0 ? nombres.get(i) : ("Parada " + c));
-                arr.put(o);
-            } catch (Exception e) { /* */ }
-        }
-        p.edit().putString("stops_" + widgetId, arr.toString()).apply();
+        try {
+            JSONObject s = new JSONObject();
+            s.put("codigo", codigo);
+            s.put("nombre", nombre);
+            p.edit().putString("stop_" + widgetId, s.toString()).remove("stops_" + widgetId).apply();
+        } catch (Exception e) { /* */ }
         BusSevWidgetProvider.actualizar(this, AppWidgetManager.getInstance(this), widgetId);
         Intent res = new Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
         setResult(RESULT_OK, res);
