@@ -783,8 +783,9 @@ html.con-mapa-completo .tabbar, html.con-mapa-completo .topbar { visibility: hid
 .map-linecard { grid-template-columns: minmax(0, 1fr); }
 .map-linecard > * { min-width: 0; }
 /* Mapa grande: los botones de zoom van debajo del botón de ubicación (no se tapan) */
-#map-all .maplibregl-ctrl-top-right { top: 70px; }
-:root:not([data-tematica="normal"]) #map-all .maplibregl-ctrl-top-right { top: 96px; }
+/* Zoom + brújula del mapa principal: abajo a la derecha, para que no choque con los botones de la derecha
+   (ubicación, autobuses, pantalla completa). Al añadir la brújula el control creció y se superponía. */
+#map-all .maplibregl-ctrl-top-right { top: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 
 /* ================= v6.1 Animación de carga ================= */
 .cargando { display: grid; justify-items: center; gap: 8px; padding: 26px 12px; text-align: center; }

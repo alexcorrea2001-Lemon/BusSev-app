@@ -1185,7 +1185,7 @@ function closeSheet() {
   mapState.bm?.source('bs-paths', fc([]));
   if (mapState.pin) { mapState.pin.remove(); mapState.pin = null; }
   $('#map-sheet').hidden = true;
-  if (mapState.linea) mapState.line.resume(); else mapState.zona?.cargar(true);
+  if (mapState.linea) mapState.line.resume();   // los buses de zona están desactivados: solo se ven al elegir línea
 }
 function selectStop(p) {
   const bm = mapState.bm;
@@ -1311,7 +1311,8 @@ function pintarBotonBuses() {
 function zonaBuses(bm, markers, onStatus) {
   let seq = 0, parar = null, deb = 0, ultima = null;
   const ZOOM_MIN = 14.3, MAX_PARADAS = 4;
-  const puede = () => settings.liveLines && !mapState.sel && !mapState.linea && location.hash === '#mapa';
+  // Desactivado a propósito: los autobuses en directo solo se muestran al ELEGIR una línea, no en toda la zona del mapa.
+  const puede = () => false;
   function ocultar() { seq++; clearTimeout(deb); markers.clear(); onStatus(''); window.BusSevBackend.cancelarFondo?.(); }
   function elegir(lista, centro) {
     if (!lista.length) return [];
@@ -1389,13 +1390,12 @@ views.mapa = (el) => {
   } else {
     if (mapState.sel) { mapState.reload?.(); mapState.stopTimer?.(); mapState.stopTimer = autoRefresh(() => mapState.reload?.()); } else if (mapState.linea) mapState.line.resume();
   }
-  mapState.zona?.empezar();
   pintarBotonBuses();
   $('#btn-buses', el).onclick = () => {
     settings.liveLines = !settings.liveLines; saveSettings(); vibrar(12);
     pintarBotonBuses();
-    toast(settings.liveLines ? 'Autobuses en directo activados' : 'Autobuses en directo desactivados');
-    if (settings.liveLines) { if (mapState.linea && !mapState.sel) { mapState.line.stop(); mapState.line.resume(); } mapState.zona?.cargar(true); }
+    toast(settings.liveLines ? (mapState.linea ? 'Autobuses en directo activados' : 'Activado · elige una línea para ver sus autobuses') : 'Autobuses en directo desactivados');
+    if (settings.liveLines) { if (mapState.linea && !mapState.sel) { mapState.line.stop(); mapState.line.resume(); } }
     else { mapState.zona?.ocultar(); mapState.line?.stop(); mapState.lineMarkers?.clear(); spin(false); const n = $('#ml-live'); if (n) n.textContent = 'Autobuses en directo desactivados (botón 🚌 del mapa).'; }
   };
   $('#btn-mapfull', el).onclick = () => mapaPantallaCompleta(!mapCompleto);
@@ -1412,7 +1412,7 @@ views.mapa = (el) => {
     refresh: () => {
       if (mapState.sel) return mapState.reload?.();
       if (!settings.liveLines) { toast('Los autobuses en directo están desactivados (botón 🚌)'); return; }
-      return mapState.linea ? mapState.line?.live() : mapState.zona?.cargar(true);
+      return mapState.linea ? mapState.line?.live() : null;   // buses solo con una línea elegida
     },
   };
 };
