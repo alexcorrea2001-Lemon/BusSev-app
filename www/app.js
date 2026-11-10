@@ -135,7 +135,7 @@ function applyTheme() {
 const PIEZAS = {"escudo": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M14 5l3 3 3-4 3 4 3-3v4H14z\" fill=\"#e2b74a\"/><path d=\"M8 10h24v11q0 11-12 16Q8 32 8 21z\" fill=\"#6d1a2a\" stroke=\"#e2b74a\" stroke-width=\"2\"/><path d=\"M20 14v18M14 20h12\" stroke=\"#e2b74a\" stroke-width=\"3\" stroke-linecap=\"round\"/><circle cx=\"20\" cy=\"20\" r=\"2\" fill=\"#6d1a2a\" stroke=\"#e2b74a\"/></svg>", "capirote": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 1 29 25H11z\" fill=\"#4b1f6f\"/><path d=\"M11 25q9 4 18 0l4 14H7z\" fill=\"#4b1f6f\"/><path d=\"M11 25q9 4 18 0\" fill=\"none\" stroke=\"#3a1557\" stroke-width=\"1\"/><ellipse cx=\"17\" cy=\"19\" rx=\"1.5\" ry=\"1\" fill=\"#120818\"/><ellipse cx=\"23\" cy=\"19\" rx=\"1.5\" ry=\"1\" fill=\"#120818\"/><circle cx=\"20\" cy=\"32\" r=\"2.6\" fill=\"#e2b74a\"/><path d=\"M7 39h26\" stroke=\"#f4efe1\" stroke-width=\"1.5\"/></svg>", "cirial": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M19.2 14h1.6v25h-1.6z\" fill=\"#c99a2e\"/><circle cx=\"20\" cy=\"22\" r=\"1.6\" fill=\"#e2b74a\"/><circle cx=\"20\" cy=\"30\" r=\"1.6\" fill=\"#e2b74a\"/><path d=\"M13 13h14l-3 4h-8z\" fill=\"#e2b74a\"/><path d=\"M15 11h10v2H15z\" fill=\"#c99a2e\"/><path d=\"M18 5h4v6h-4z\" fill=\"#f6f1e2\"/><path d=\"M20 .5q3 2.6 0 4.5-3-1.9 0-4.5z\" fill=\"#ffb02e\"/></svg>", "candelabro": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 38V14M20 31 8 19M20 31l12-12M20 25l-7-10M20 25l7-10\" stroke=\"#e2b74a\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\"/><path d=\"M15 38h10\" stroke=\"#c99a2e\" stroke-width=\"3\"/><rect x=\"18.8\" y=\"8\" width=\"2.4\" height=\"6\" fill=\"#f6f1e2\"/><path d=\"M20 4.5q2 1.8 0 3.3-2-1.5 0-3.3z\" fill=\"#ffb02e\"/><rect x=\"6.8\" y=\"13\" width=\"2.4\" height=\"6\" fill=\"#f6f1e2\"/><path d=\"M8 9.5q2 1.8 0 3.3-2-1.5 0-3.3z\" fill=\"#ffb02e\"/><rect x=\"30.8\" y=\"13\" width=\"2.4\" height=\"6\" fill=\"#f6f1e2\"/><path d=\"M32 9.5q2 1.8 0 3.3-2-1.5 0-3.3z\" fill=\"#ffb02e\"/><rect x=\"11.8\" y=\"9\" width=\"2.4\" height=\"6\" fill=\"#f6f1e2\"/><path d=\"M13 5.5q2 1.8 0 3.3-2-1.5 0-3.3z\" fill=\"#ffb02e\"/><rect x=\"25.8\" y=\"9\" width=\"2.4\" height=\"6\" fill=\"#f6f1e2\"/><path d=\"M27 5.5q2 1.8 0 3.3-2-1.5 0-3.3z\" fill=\"#ffb02e\"/></svg>", "incensario": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 1v8M13 2l4 10M27 2l-4 10\" stroke=\"#c99a2e\" stroke-width=\"1.1\"/><circle cx=\"20\" cy=\"2\" r=\"1.6\" fill=\"#e2b74a\"/><path d=\"M12 14q8-6 16 0z\" fill=\"#e2b74a\"/><path d=\"M11 15h18q0 11-9 13-9-2-9-13z\" fill=\"#d9a93a\"/><path d=\"M14 18h12M15 22h10\" stroke=\"#a87b1e\" stroke-width=\"1\"/><path d=\"M17 28h6v3h-6zM13 33h14v2H13z\" fill=\"#c99a2e\"/><path d=\"M31 10q4-3 1-7M34 13q4-4 1-9\" stroke=\"#d8d2c4\" stroke-width=\"1.3\" fill=\"none\" opacity=\".8\"/></svg>", "naveta": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M4 18q16 13 32 0-16 4-32 0z\" fill=\"#e2b74a\"/><path d=\"M6 18q14 3 28 0\" stroke=\"#a87b1e\" fill=\"none\"/><path d=\"M8 15q12-5 24 0\" fill=\"#d9a93a\"/><circle cx=\"20\" cy=\"12\" r=\"1.8\" fill=\"#e2b74a\"/><path d=\"M18 26h4l2 7h-8z\" fill=\"#c99a2e\"/><path d=\"M13 34h14\" stroke=\"#c99a2e\" stroke-width=\"2.5\"/></svg>", "regalo": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><rect x=\"7\" y=\"17\" width=\"26\" height=\"20\" rx=\"2\" fill=\"#d42a3c\"/><rect x=\"5\" y=\"12\" width=\"30\" height=\"7\" rx=\"2\" fill=\"#ef4655\"/><rect x=\"18\" y=\"12\" width=\"4\" height=\"25\" fill=\"#f5c518\"/><path d=\"M20 12C14 3 7 9 20 12 33 9 26 3 20 12z\" fill=\"none\" stroke=\"#f5c518\" stroke-width=\"2.4\"/></svg>", "arbol": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 4l9 12h-4l8 10h-6l8 9H5l8-9H7l8-10h-4z\" fill=\"#1d7a3a\"/><rect x=\"17\" y=\"35\" width=\"6\" height=\"4\" fill=\"#7a4a1f\"/><circle cx=\"15\" cy=\"22\" r=\"1.8\" fill=\"#ff3b3b\"/><circle cx=\"25\" cy=\"29\" r=\"1.8\" fill=\"#ffd23b\"/><circle cx=\"23\" cy=\"17\" r=\"1.6\" fill=\"#3bb8ff\"/><circle cx=\"13\" cy=\"31\" r=\"1.6\" fill=\"#ffd23b\"/><path d=\"M20 0l1.4 2.9 3.2.4-2.3 2.2.6 3.1L20 7l-2.9 1.6.6-3.1-2.3-2.2 3.2-.4z\" fill=\"#f5c518\"/></svg>", "estrella": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 3l4.7 10.2 11.1 1.2-8.3 7.5 2.4 11L20 27.3 10.1 33l2.4-11-8.3-7.5 11.1-1.2z\" fill=\"#f5c518\"/></svg>", "copo": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><g stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" fill=\"none\"><path d=\"M20 3v34M5.3 11.5l29.4 17M5.3 28.5l29.4-17\"/><path d=\"M15 6l5 4 5-4M15 34l5-4 5 4M5 17l6 1-1-6M35 23l-6-1 1 6M5 23l6-1-1 6M35 17l-6 1 1-6\"/></g></svg>", "abanico": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 34 3 17a24 24 0 0 1 34 0z\" fill=\"#e5303c\"/><g stroke=\"#9c1420\" stroke-width=\".8\"><path d=\"M20 34 32.0 21.9\"/><path d=\"M20 34 29.4 19.8\"/><path d=\"M20 34 26.4 18.3\"/><path d=\"M20 34 23.3 17.3\"/><path d=\"M20 34 19.9 17.0\"/><path d=\"M20 34 16.6 17.3\"/><path d=\"M20 34 13.5 18.3\"/><path d=\"M20 34 10.5 19.9\"/><path d=\"M20 34 8.0 22.0\"/></g><g fill=\"#fff\"><circle cx=\"10\" cy=\"19\" r=\"1.6\"/><circle cx=\"16\" cy=\"14\" r=\"1.6\"/><circle cx=\"24\" cy=\"14\" r=\"1.6\"/><circle cx=\"30\" cy=\"19\" r=\"1.6\"/><circle cx=\"13\" cy=\"24\" r=\"1.6\"/><circle cx=\"20\" cy=\"19\" r=\"1.6\"/><circle cx=\"27\" cy=\"24\" r=\"1.6\"/></g><path d=\"M3 17a24 24 0 0 1 34 0\" fill=\"none\" stroke=\"#f7f3e8\" stroke-width=\"1.5\"/><rect x=\"18\" y=\"33\" width=\"4\" height=\"6\" rx=\"1\" fill=\"#6b3b1f\"/></svg>", "sombrero": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><ellipse cx=\"20\" cy=\"28\" rx=\"18\" ry=\"5\" fill=\"#1d1d1d\"/><path d=\"M11 27V16q0-4 9-4t9 4v11z\" fill=\"#262626\"/><rect x=\"11\" y=\"22\" width=\"18\" height=\"3\" fill=\"#7a1f2b\"/><ellipse cx=\"20\" cy=\"16\" rx=\"9\" ry=\"2.4\" fill=\"#333\"/></svg>", "castanuelas": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M14 8q8 0 8 12t-8 12q-8 0-8-12t8-12z\" fill=\"#8a4a1f\"/><path d=\"M26 10q8 0 8 12t-8 12q-6 0-7.5-6\" fill=\"#a85d28\"/><path d=\"M14 8q2-5 6-4 4-1 6 6\" stroke=\"#e5303c\" stroke-width=\"2\" fill=\"none\"/><circle cx=\"14\" cy=\"20\" r=\"2\" fill=\"#5e2f12\"/></svg>", "farolillo": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 0v5\" stroke=\"#5b4a2a\"/><rect x=\"15\" y=\"5\" width=\"10\" height=\"3\" rx=\"1\" fill=\"#2b2b2b\"/><ellipse cx=\"20\" cy=\"21\" rx=\"13\" ry=\"13\" fill=\"#0f8a3c\"/><path d=\"M20 8q-12 13 0 26M20 8q12 13 0 26M20 8q-6 13 0 26M20 8q6 13 0 26\" stroke=\"#0a6129\" fill=\"none\" stroke-width=\".9\"/><g fill=\"#fff\"><circle cx=\"13\" cy=\"17\" r=\"1.6\"/><circle cx=\"20\" cy=\"14\" r=\"1.6\"/><circle cx=\"27\" cy=\"17\" r=\"1.6\"/><circle cx=\"16\" cy=\"25\" r=\"1.6\"/><circle cx=\"24\" cy=\"25\" r=\"1.6\"/></g><rect x=\"16\" y=\"33\" width=\"8\" height=\"3\" rx=\"1\" fill=\"#2b2b2b\"/></svg>", "murcielago": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 17c-3-4-5-4-6-2-2-4-7-5-12-2 4 1 5 4 5 7 2-2 5-2 6 1 2-2 4-1 7 2 3-3 5-4 7-2 1-3 4-3 6-1 0-3 1-6 5-7-5-3-10-2-12 2-1-2-3-2-6 2z\" fill=\"#1b0d24\"/><path d=\"M17 13l1 3M23 13l-1 3\" stroke=\"#1b0d24\" stroke-width=\"2\"/><circle cx=\"18.6\" cy=\"17\" r=\".9\" fill=\"#ffb02e\"/><circle cx=\"21.4\" cy=\"17\" r=\".9\" fill=\"#ffb02e\"/></svg>", "calabaza": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><ellipse cx=\"20\" cy=\"24\" rx=\"16\" ry=\"12\" fill=\"#ff8a1f\"/><path d=\"M20 12q-9 12 0 24M20 12q9 12 0 24M20 12q-15 12 0 24M20 12q15 12 0 24\" stroke=\"#d9650a\" fill=\"none\" stroke-width=\"1.2\"/><path d=\"M19 13q0-6 4-9\" stroke=\"#3c7a2a\" stroke-width=\"3\" fill=\"none\" stroke-linecap=\"round\"/><path d=\"M11 20l5 3-5 2zM29 20l-5 3 5 2z\" fill=\"#3a1500\"/><path d=\"M11 28q9 7 18 0l-3 1-2-2-2 2-2-2-2 2-2-2-2 2z\" fill=\"#3a1500\"/></svg>", "fantasma": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M8 37V18Q8 5 20 5t12 13v19l-4-3-4 3-4-3-4 3-4-3z\" fill=\"#f4f1ff\"/><ellipse cx=\"16\" cy=\"18\" rx=\"2\" ry=\"3\" fill=\"#222\"/><ellipse cx=\"24\" cy=\"18\" rx=\"2\" ry=\"3\" fill=\"#222\"/><ellipse cx=\"20\" cy=\"26\" rx=\"2.4\" ry=\"2\" fill=\"#222\"/></svg>", "arana": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 40\"><path d=\"M20 0v14\" stroke=\"#ddd\" stroke-width=\".7\"/><g stroke=\"#111\" stroke-width=\"1.4\" fill=\"none\"><path d=\"M17 18l-7-4-3 5M17 21l-9 0-2 5M17 23l-7 4-1 6M23 18l7-4 3 5M23 21l9 0 2 5M23 23l7 4 1 6\"/></g><ellipse cx=\"20\" cy=\"21\" rx=\"5\" ry=\"6\" fill=\"#111\"/><circle cx=\"20\" cy=\"15\" r=\"3\" fill=\"#111\"/><circle cx=\"19\" cy=\"14.5\" r=\".7\" fill=\"#ff3b3b\"/><circle cx=\"21\" cy=\"14.5\" r=\".7\" fill=\"#ff3b3b\"/></svg>"};
 const FIESTA = {
   navidad: { cosas: ['copo', 'regalo', 'copo', 'arbol', 'estrella', 'copo'], modo: 'caer', giro: 360, saludo: '🎄 ¡Feliz Navidad!', sub: 'BusSev se viste de fiesta hasta Reyes.' },
-  semanasanta: { cosas: ['escudo', 'capirote', 'cirial', 'candelabro', 'incensario', 'naveta'], modo: 'mecer', giro: 16, saludo: '✝️ Semana Santa en Sevilla', sub: 'Muchas líneas cambian de recorrido: mira los avisos de TUSSAM.' },
+  semanasanta: { cosas: ['escudo1', 'escudo2', 'escudo3', 'escudo4', 'escudo5'], img: 'escudos', modo: 'caer', giro: 20, saludo: '✝️ Semana Santa en Sevilla', sub: 'Muchas líneas cambian de recorrido: mira los avisos de TUSSAM.' },
   feria: { cosas: ['💃', 'abanico', 'sombrero', '💃', 'castanuelas', 'farolillo'], modo: 'mecer', giro: 30, saludo: '💃 ¡Feliz Feria de Abril!', sub: 'Las lanzaderas al Real salen en los avisos de TUSSAM.' },
   halloween: { cosas: ['murcielago', 'calabaza', 'fantasma', 'murcielago', 'arana', 'calabaza'], modo: 'volar', giro: 20, saludo: '🎃 ¡Feliz Halloween!', sub: 'Cuidado con los murciélagos de la parada…' },
 };
@@ -155,7 +155,7 @@ function fiesta(tem) {
     const x = Math.round((i + Math.random() * 0.8) * (100 / n));
     const dur = (11 + Math.random() * 9).toFixed(1), del = (-Math.random() * 20).toFixed(1), tam = Math.round(22 + Math.random() * 16);
     const dx = Math.round(Math.random() * 80 - 40), r = Math.round((Math.random() * 2 - 1) * f.giro);
-    const dentro = PIEZAS[c] || c;
+    const dentro = f.img ? `<img class="fiesta-img" src="/img/${f.img}/${c}.webp" alt="" loading="lazy">` : (PIEZAS[c] || c);
     h += `<span style="left:${x}%;font-size:${Math.round(tam * 0.8)}px;width:${tam}px;height:${tam}px;animation-duration:${dur}s;animation-delay:${del}s;--dx:${dx}px;--r:${r}deg">${dentro}</span>`;
   }
   capa.innerHTML = h;
@@ -725,7 +725,7 @@ function createMap(el, center, zoom) {
     if (!m.getSource(def.source)) m.addSource(def.source, { type: 'geojson', data: data.get(def.source) || { type: 'FeatureCollection', features: [] } });
     if (!m.getLayer(def.id)) m.addLayer(def);
   }
-  m.on('style.load', () => { estiloListo = true; for (const d of installers) install(d); });
+  m.on('style.load', () => { estiloListo = true; for (const d of installers) install(d); aplicarCapasMapa(bm); });
   m.on('error', () => { /* teselas que no cargan sin cobertura: no es un fallo de la app */ });
   /* Si Android le quita la gráfica al mapa (pasa al estar un rato en otra app), el mapa se queda gris:
      se avisa a la pantalla para que lo vuelva a crear. */
@@ -737,6 +737,16 @@ function createMap(el, center, zoom) {
   bm.rehacer = () => { setTimeout(() => { if (bm.perdido()) window.dispatchEvent(new CustomEvent('bussev-mapa-perdido', { detail: bm })); }, 1200); };
   liveMaps.add(bm);
   return bm;
+}
+/* #64 Mostrar u ocultar capas del mapa (paradas, recorridos, nombres de calles). Por defecto todo visible. */
+function aplicarCapasMapa(bm) {
+  if (!bm?.m) return;
+  const m = bm.m;
+  const vis = (id, on) => { try { if (m.getLayer(id)) m.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); } catch { /* */ } };
+  vis('bs-stops', settings.mapaParadas !== false);
+  for (const id of ['bs-route-casing', 'bs-route', 'bs-route-stops', 'bs-paths']) vis(id, settings.mapaRecorridos !== false);
+  // Nombres de calles y sitios = las capas de texto del mapa base
+  try { for (const l of m.getStyle()?.layers || []) if (l.type === 'symbol') m.setLayoutProperty(l.id, 'visibility', settings.mapaCalles !== false ? 'visible' : 'none'); } catch { /* */ }
 }
 const fc = (features) => ({ type: 'FeatureCollection', features });
 const pointF = (pos, props = {}) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: ll(pos) }, properties: props });
@@ -1068,6 +1078,24 @@ let routeCount = 0;
 const goBack = () => { if (routeCount > 1) history.back(); else location.hash = lastTab; };
 const spin = (on) => $('#btn-refresh').classList.toggle('spinning', !!on);
 
+/* Autobuses nocturnos (Búho): de noche se enseñan en Favoritas con su última hora */
+function esHoraNoche() { const h = new Date().getHours(); return h >= 22 || h < 6; }
+function lineasNocturnas() {
+  return [...cache.lineaByNum.values()]
+    .filter((l) => l.nocturna || /^A\d/.test(String(l.numero || '')))
+    .sort((a, b) => String(a.numero).localeCompare(String(b.numero), 'es', { numeric: true }));
+}
+function nocturnasHTML() {
+  if (!esHoraNoche()) return '';
+  const ls = lineasNocturnas();
+  if (!ls.length) return '';
+  const rows = ls.map((l) => {
+    const fin = l.hora_fin_ida || l.hora_fin_vuelta;
+    return `<a class="row" href="#linea-${esc(l.numero)}">${badge(l.numero, l.color)}<div class="row-main"><b>${esc(l.nombre)}</b><span>${fin ? `Último bus sobre las ${esc(fin)}` : 'Autobús nocturno'}</span></div>${ICON.chev}</a>`;
+  }).join('');
+  return `<div class="set-group"><h3>🌙 Autobuses nocturnos</h3><div class="list">${rows}</div><p class="small muted" style="margin:.4rem 0 0">Las líneas Búho circulan de madrugada. Toca una para ver su recorrido y los tiempos.</p></div>`;
+}
+
 /* ---------- Favoritas ---------- */
 views.favoritas = (el) => {
   let stop = null, loading = false, results = null, dead = false;
@@ -1093,6 +1121,7 @@ views.favoritas = (el) => {
     const marco = `${list.map((f) => f.codigo).join(',')}|${avs.map((a) => a.id + ':' + a.at).join(',')}`;
     if (el.__marco === marco && $('#fav-cards', el)) {
       setHTML($('#fav-cards', el), cards);
+      const nb = $('#fav-noche', el); if (nb) setHTML(nb, nocturnasHTML());
       $('#fav-upd', el).textContent = results ? `Actualizado a las ${fmtClock()} · ${refreshNote()}` : '';
       return true;
     }
@@ -1100,6 +1129,7 @@ views.favoritas = (el) => {
     el.innerHTML = `<div class="stack view-anim"><div class="page-head row-between"><div><h1>Favoritas</h1><p>Tus paradas con los tiempos en directo.</p></div><a class="btn ghost sm" href="#ruta">${ICON.route}Cómo llegar</a></div>
       ${avs.length ? `<div class="set-group"><h3>Avisos de llegada</h3>${avs.map((a) => `<div class="row-flat">${badge(a.linea, lineaFor(a.linea)?.color, { sm: true })}<div style="flex:1;min-width:0"><b>${esc(a.parada)}</b><p class="help">Cuando falten ${a.antes} min · sobre las ${new Date(a.at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p></div><button class="back-btn" type="button" data-av-del="${a.id}" aria-label="Quitar aviso">${ICON.close}</button></div>`).join('')}</div>` : ''}
       ${saludoFiestaHTML()}
+      <div id="fav-noche">${nocturnasHTML()}</div>
       <div id="fav-avisos"></div>
       <div class="stack" id="fav-cards">${cards}</div>
       <p class="updated" id="fav-upd">${results ? `Actualizado a las ${fmtClock()} · ${refreshNote()}` : ''}</p>
@@ -1137,6 +1167,7 @@ views.favoritas = (el) => {
   }
   window.addEventListener('bussev-avisos', pintarAvisos);
   getParadas().then(() => { if (paint()) load(); }).catch(() => { if (paint()) load(); });
+  getLineas().then(() => { if (!dead) { const nb = $('#fav-noche', el); if (nb) setHTML(nb, nocturnasHTML()); } }).catch(() => null);
   stop = autoRefresh(load);
   active.rerender = () => { el.__marco = null; if (paint()) load(); };
   return { cleanup: () => { dead = true; stop?.(); window.removeEventListener('bussev-avisos', pintarAvisos); }, refresh: load };
@@ -1781,7 +1812,12 @@ views.ajustes = (el) => {
           ${Object.entries(FONDOS).map(([k, f]) => `<button type="button" class="fondo" data-fondo="${k}" aria-pressed="${settings.fondo === k}"><span style="background:${f.bg};border-color:${f.line}"><i style="background:${f.surface}"></i></span><small>${esc(f.label)}</small></button>`).join('')}
         </div>
         <p>Los cuatro primeros son claros y el resto oscuros: al elegir uno, el tema cambia solo a claro u oscuro.</p></div>
-      <div class="set-group"><h3>Mapa</h3>${segBtns('mapStyle', [['oscuro', 'Oscuro'], ['claro', 'Claro'], ['tema', 'Como el tema']], settings.mapStyle)}</div>
+      <div class="set-group"><h3>Mapa</h3>${segBtns('mapStyle', [['oscuro', 'Oscuro'], ['claro', 'Claro'], ['tema', 'Como el tema']], settings.mapStyle)}
+        <h3 style="margin-top:14px">Qué ver en el mapa</h3>
+        ${sw('mapaParadas', settings.mapaParadas !== false, 'Paradas', 'Los puntos de las paradas.')}
+        ${sw('mapaRecorridos', settings.mapaRecorridos !== false, 'Recorridos', 'La línea del autobús cuando eliges una.')}
+        ${sw('mapaCalles', settings.mapaCalles !== false, 'Nombres de calles', 'Las etiquetas de calles y sitios del mapa.')}
+        <p class="help">Los autobuses en directo se encienden con el botón 🚌 del mapa.</p></div>
 
       <h2 class="section-title">Accesibilidad</h2>
       <div class="set-group">
@@ -1839,7 +1875,7 @@ views.ajustes = (el) => {
       render();
     }; });
     el.querySelectorAll('[data-sw]').forEach((b) => { b.onchange = () => {
-      settings[b.dataset.sw] = b.checked; saveSettings(); applyTheme(); render();
+      settings[b.dataset.sw] = b.checked; saveSettings(); applyTheme(); render(); aplicarCapasMapa(mapState.bm);
     }; });
     el.querySelectorAll('[data-tem]').forEach((b) => { b.onclick = () => { settings.tematicaAuto = false; settings.tematica = b.dataset.tem; saveSettings(); applyTheme(); render(); }; });
     el.querySelectorAll('[data-color]').forEach((b) => { b.onclick = () => { settings.color = b.dataset.color; saveSettings(); applyTheme(); render(); }; });

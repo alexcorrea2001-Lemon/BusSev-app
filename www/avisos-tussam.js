@@ -149,8 +149,19 @@ window.avisosTussam = (() => {
     const art = doc.querySelector('article.node--type-aviso-a-los-clientes, article.node, main article') || doc.querySelector('#main-content')?.parentElement;
     if (!art) throw new Error('No se ha podido leer el aviso.');
     const campos = [];
-    let imagen = null;
+    const adjuntos = [];
     const enlaceOk = (h) => { try { const u = new URL(h, TUSSAM_WEB); return u.origin === TUSSAM_WEB && u.protocol === 'https:' ? u.href : null; } catch { return null; } };
+    const esPdf = (href, texto) => /\.pdf(\?|$)/i.test(href || '') || (/pdf/i.test(texto || '') && !/\.(png|jpe?g|gif|webp)(\?|$)/i.test(href || ''));
+    const agregarAdjuntos = (nodo) => {
+      for (const a of nodo.querySelectorAll('a[href]')) {
+        const raw = a.getAttribute('href');
+        if (!(/ver imagen|imagen|plano|pdf|descargar/i.test(a.textContent) || /\.(png|jpe?g|gif|webp|pdf)(\?|$)/i.test(raw))) continue;
+        const href = enlaceOk(raw);
+        if (!href || adjuntos.some((x) => x.href === href)) continue;
+        const pdf = esPdf(href, a.textContent);
+        adjuntos.push({ href, pdf, texto: pdf ? 'Abrir PDF' : 'Ver imagen o plano' });
+      }
+    };
     const bloques = (nodo) => {
       const out = [];
       const ps = nodo.querySelectorAll('p, li, h2, h3, h4, tr');
@@ -169,9 +180,8 @@ window.avisosTussam = (() => {
       const lab = limpio(f.querySelector('.views-label')?.textContent).replace(/:$/, '');
       const cont = f.querySelector('.field-content');
       if (!cont) continue;
-      const img = [...cont.querySelectorAll('a[href]')].find((a) => /ver imagen|imagen|plano|pdf/i.test(a.textContent) || /\.(png|jpe?g|gif|pdf)(\?|$)/i.test(a.getAttribute('href')));
-      if (img && !lab) { imagen = enlaceOk(img.getAttribute('href')); continue; }
-      if (!lab) continue;                                                    // título con la imagen de la línea
+      if (!lab) { agregarAdjuntos(cont); continue; }                         // bloque sin etiqueta: imágenes/PDF del aviso
+      agregarAdjuntos(cont);                                                 // también puede haber adjuntos dentro de un campo con etiqueta
       const b = bloques(cont);
       if (b.length) campos.push({ lab, b });
     }
@@ -179,11 +189,10 @@ window.avisosTussam = (() => {
       const cuerpo = art.querySelector('.node__content, .field--name-body, .panel-body') || art;
       const b = bloques(cuerpo).slice(0, 300);
       if (b.length) campos.push({ lab: '', b });
-      const img = [...cuerpo.querySelectorAll('a[href]')].find((a) => /\.(png|jpe?g|gif|pdf)(\?|$)/i.test(a.getAttribute('href')));
-      if (img) imagen = enlaceOk(img.getAttribute('href'));
+      agregarAdjuntos(cuerpo);
     }
     const h1 = limpio(art.querySelector('h1')?.textContent || doc.querySelector('h1')?.textContent);
-    return { h1, campos, imagen };
+    return { h1, campos, adjuntos, imagen: adjuntos[0]?.href || null };
   }
   async function detalle(id, forzar = false) {
     const k = 'tussam.det.' + id;
@@ -217,8 +226,9 @@ window.avisosTussam = (() => {
       detalle(id).then((d) => {
         const box = $('#av-det', m);
         if (!box) return;
-        box.innerHTML = detalleHTML(d) + (d.imagen ? `<button class="btn ghost block" type="button" id="av-img">🗺️ Ver imagen o plano</button>` : '');
-        if (d.imagen) $('#av-img', m).onclick = () => openWeb(d.imagen);
+        const adj = d.adjuntos && d.adjuntos.length ? d.adjuntos : (d.imagen ? [{ href: d.imagen, pdf: /\.pdf(\?|$)/i.test(d.imagen), texto: 'Ver imagen o plano' }] : []);
+        box.innerHTML = detalleHTML(d) + adj.map((a, i) => `<button class="btn ghost block" type="button" data-av="${i}">${a.pdf ? '📄' : '🗺️'} ${a.texto}</button>`).join('');
+        adj.forEach((a, i) => { const b = $(`[data-av="${i}"]`, m); if (b) b.onclick = () => openWeb(a.href); });
       }).catch((e) => {
         const box = $('#av-det', m);
         if (box) box.innerHTML = `<p class="help">${esc(e.message || 'No se ha podido abrir el aviso.')} Puedes verlo en la web de TUSSAM.</p>`;

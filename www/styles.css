@@ -573,6 +573,7 @@ details.set-group[open] > summary::after { transform: rotate(-90deg); }
 /* ================= v5.2 Temáticas más festivas ================= */
 .fiesta { position: fixed; inset: 0; pointer-events: none; z-index: 1200; overflow: hidden; contain: strict; }
 .fiesta span { position: absolute; top: -40px; line-height: 1; opacity: .65; will-change: transform; animation: caer linear infinite; text-shadow: 0 1px 3px rgb(0 0 0 / .25); }
+.fiesta-img { width: 100%; height: 100%; object-fit: contain; display: block; filter: drop-shadow(0 1px 2px rgb(0 0 0 / .2)); }
 .f-subir span { top: auto; bottom: -40px; animation-name: subir; opacity: .55; color: #e2b74a; }
 .f-volar span { animation-name: volar; }
 :root[data-tematica="navidad"] .fiesta span { color: #fff; }
@@ -790,10 +791,13 @@ html.con-mapa-completo .tabbar, html.con-mapa-completo .topbar { visibility: hid
 .busmk.veh-paso.izq .busmk-img { transform: none; }
 .map-linecard { grid-template-columns: minmax(0, 1fr); }
 .map-linecard > * { min-width: 0; }
-/* Mapa grande: los botones de zoom van debajo del botón de ubicación (no se tapan) */
-/* Zoom + brújula del mapa principal: abajo a la derecha, para que no choque con los botones de la derecha
-   (ubicación, autobuses, pantalla completa). Al añadir la brújula el control creció y se superponía. */
-#map-all .maplibregl-ctrl-top-right { top: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+/* Mapa grande: el zoom + brújula arriba a la derecha; los botones de acción
+   (ubicación, autobuses, pantalla completa) se agrupan abajo a la derecha, a mano,
+   aprovechando el hueco central y sin chocar con el zoom. */
+#map-all .maplibregl-ctrl-top-right { top: 70px; }
+:root:not([data-tematica="normal"]) #map-all .maplibregl-ctrl-top-right { top: 96px; }
+.map-fabs { position: absolute; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 500; display: flex; flex-direction: column-reverse; align-items: center; gap: 10px; }
+.map-fabs .fab { position: static; top: auto; right: auto; }
 
 /* ================= v6.1 Animación de carga ================= */
 .cargando { display: grid; justify-items: center; gap: 8px; padding: 26px 12px; text-align: center; }
