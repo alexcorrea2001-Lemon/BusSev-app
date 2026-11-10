@@ -42,6 +42,28 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Widget de pantalla de inicio: una parada favorita con sus próximos autobuses -->
+        <receiver
+            android:name=".BusSevWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="es.bussev.app.WIDGET_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/bussev_widget_info" />
+        </receiver>
+
+        <activity
+            android:name=".BusSevWidgetConfig"
+            android:theme="@android:style/Theme.DeviceDefault.Light.Dialog"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
     </application>
 
     <!-- Permissions -->

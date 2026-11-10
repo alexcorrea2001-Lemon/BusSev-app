@@ -1178,10 +1178,10 @@ function nocturnasHTML() {
   return `<div class="set-group"><h3>🌙 Autobuses nocturnos</h3><div class="list">${rows}</div><p class="small muted" style="margin:.4rem 0 0">Las líneas Búho circulan de madrugada. Toca una para ver su recorrido y los tiempos.</p></div>`;
 }
 
-/* Sin conexión: aviso en Favoritas de que los horarios son los últimos guardados */
+/* Sin conexión: aviso en Favoritas de que los horarios son orientativos, no en tiempo real */
 function offlineHTML() {
   if (navigator.onLine !== false) return '';
-  return `<div class="dia-aviso dia-offline">📴 <span>Sin conexión. Se muestran los últimos horarios guardados en el móvil; pueden no estar al día.</span></div>`;
+  return `<div class="dia-aviso dia-offline">📴 <span>Sin conexión: estos <b>no son los tiempos reales</b>. Son los últimos guardados y pueden no ser exactos.</span></div>`;
 }
 
 /* ---------- Favoritas ---------- */
