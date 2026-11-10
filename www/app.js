@@ -325,6 +325,22 @@ function lineaFor(label) {
   const s = String(label ?? '');
   return cache.lineaByNum.get(s) || cache.lineaByNum.get(s.padStart(2, '0')) || cache.lineaByNum.get(s.replace(/^0+(?=\w)/, '')) || null;
 }
+/* #52 Widget de inicio: la app guarda en el widget nativo las credenciales de TUSSAM y las
+   paradas favoritas (con su nombre), para que pueda consultar y para elegir parada al añadirlo. */
+function actualizarWidget() {
+  try {
+    if (!window.Capacitor?.isPluginAvailable?.('BusSevWidget')) return;
+    const creds = window.BUSSEV_TUSSAM || {};
+    const favoritas = (favs.list() || []).map((f) => ({
+      codigo: String(f.codigo),
+      nombre: f.alias || cache.paradaByCode.get(String(f.codigo))?.nombre || ('Parada ' + f.codigo),
+    }));
+    window.Capacitor.nativePromise('BusSevWidget', 'setConfig', {
+      clientId: creds.clientId || '', clientSecret: creds.clientSecret || '',
+      user: creds.user || '', pass: creds.pass || '', favoritas,
+    }).catch(() => { /* */ });
+  } catch { /* */ }
+}
 function getRuta(numero) {
   if (!cache.rutas.has(numero)) {
     cache.rutas.set(numero, api(`/lineas/${encodeURIComponent(numero)}/paradas`).then((stops) => {
@@ -1230,7 +1246,7 @@ views.favoritas = (el) => {
     window.avisosTussam?.favoritasHTML().then((h) => setHTML($('#fav-avisos', el), h)).catch(() => null);
   }
   window.addEventListener('bussev-avisos', pintarAvisos);
-  getParadas().then(() => { if (paint()) load(); }).catch(() => { if (paint()) load(); });
+  getParadas().then(() => { if (paint()) load(); actualizarWidget(); }).catch(() => { if (paint()) load(); });
   getLineas().then(() => { if (!dead) { const nb = $('#fav-noche', el); if (nb) setHTML(nb, nocturnasHTML()); } }).catch(() => null);
   stop = autoRefresh(load);
   active.rerender = () => { el.__marco = null; if (paint()) load(); };

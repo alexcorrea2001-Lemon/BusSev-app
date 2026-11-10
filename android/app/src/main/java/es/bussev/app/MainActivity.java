@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(TarjetaNfcPlugin.class);
         registerPlugin(TussamWebPlugin.class);
+        registerPlugin(BusSevWidgetPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Botón Atrás: primero lo gestiona la app (cerrar ventanas, volver a la

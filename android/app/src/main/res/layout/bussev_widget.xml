@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bussev_widget_bg"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/w_stop"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:textSize="15sp"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:text="BusSev" />
+
+        <TextView
+            android:id="@+id/w_refresh"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="↻"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:paddingLeft="10dp"
+            android:paddingRight="4dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/w_row0"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="7dp">
+        <TextView android:id="@+id/w_line0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="36dp" android:textStyle="bold" android:textColor="#FFFFFF" android:textSize="14sp" android:text="" />
+        <TextView android:id="@+id/w_dest0" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:paddingLeft="8dp" android:maxLines="1" android:ellipsize="end" android:textColor="#D6D7DC" android:textSize="13sp" android:text="" />
+        <TextView android:id="@+id/w_min0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textStyle="bold" android:textColor="#FFFFFF" android:textSize="14sp" android:text="" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/w_row1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="6dp">
+        <TextView android:id="@+id/w_line1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="36dp" android:textStyle="bold" android:textColor="#FFFFFF" android:textSize="14sp" android:text="" />
+        <TextView android:id="@+id/w_dest1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:paddingLeft="8dp" android:maxLines="1" android:ellipsize="end" android:textColor="#D6D7DC" android:textSize="13sp" android:text="" />
+        <TextView android:id="@+id/w_min1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textStyle="bold" android:textColor="#FFFFFF" android:textSize="14sp" android:text="" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/w_row2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="6dp">
+        <TextView android:id="@+id/w_line2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="36dp" android:textStyle="bold" android:textColor="#FFFFFF" android:textSize="14sp" android:text="" />
+        <TextView android:id="@+id/w_dest2" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:paddingLeft="8dp" android:maxLines="1" android:ellipsize="end" android:textColor="#D6D7DC" android:textSize="13sp" android:text="" />
+        <TextView android:id="@+id/w_min2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textStyle="bold" android:textColor="#FFFFFF" android:textSize="14sp" android:text="" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/w_updated"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="8dp"
+        android:textColor="#8A8C95"
+        android:textSize="11sp"
+        android:text="" />
+</LinearLayout>

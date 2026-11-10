@@ -681,17 +681,14 @@ html.oculta .fiesta span, html.oculta .topbar::after { animation-play-state: pau
 .a-botones .arr, .a-botones .row, .a-botones .av-row, .a-botones .timeline a { min-height: 64px; }
 .a-botones .switch { transform: scale(1.3); margin-right: 6px; }
 
-/* Modo sencillo (#63): todo más grande, más espaciado y sin adornos, para quien quiere lo justo */
-.a-sencillo:not(.a-letra) .view:not(.view-map), .a-sencillo:not(.a-letra) .modal, .a-sencillo:not(.a-letra) .toast { zoom: 1.2; }
-.a-sencillo .btn { min-height: 60px; font-size: 19px; border-radius: 14px; font-weight: 700; }
-.a-sencillo .btn.sm { min-height: 50px; font-size: 16px; }
-.a-sencillo .fav-btn, .a-sencillo .icon-btn, .a-sencillo .back-btn { width: 58px; height: 58px; }
-.a-sencillo .icon-btn svg, .a-sencillo .back-btn svg, .a-sencillo .fav-btn svg { width: 30px; height: 30px; }
-.a-sencillo .arr, .a-sencillo .row, .a-sencillo .av-row, .a-sencillo .timeline a { min-height: 62px; }
+/* Modo sencillo (#63): más espaciado, botones fáciles de tocar y sin adornos (sin agrandar la letra) */
+.a-sencillo .btn { min-height: 56px; border-radius: 14px; }
+.a-sencillo .btn.sm { min-height: 46px; }
+.a-sencillo .fav-btn, .a-sencillo .icon-btn, .a-sencillo .back-btn { width: 56px; height: 56px; }
+.a-sencillo .arr, .a-sencillo .row, .a-sencillo .av-row, .a-sencillo .timeline a { min-height: 60px; }
 .a-sencillo .card, .a-sencillo .set-group { padding: 16px; }
-.a-sencillo .tabbar a { font-weight: 700; }
-.a-sencillo .tabbar svg { width: 28px; height: 28px; }
-.a-sencillo .card-title h3, .a-sencillo .row-main b, .a-sencillo .arr-dest b { font-size: 1.08em; }
+/* Menú de abajo: en sencillo solo hay 3 pestañas; que ocupen todo el ancho (sin el hueco de la derecha) */
+:root.a-sencillo .tabbar { grid-template-columns: repeat(3, 1fr); }
 /* Fuera adornos, enlaces secundarios y textos de relleno */
 .a-sencillo .fiesta-img, .a-sencillo .saludo-fiesta, .a-sencillo .page-head p, .a-sencillo .updated, .a-sencillo .live-note, .a-sencillo .map-legend, .a-sencillo .page-head .btn.ghost { display: none; }
 .a-sencillo .help, .a-sencillo .small.muted { font-size: 15px; }
