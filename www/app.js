@@ -424,7 +424,10 @@ function boardHTML(tiempos, status, { limit = 99, filtrado = false, codigo = nul
   const rows = groups.slice(0, limit).map((g) => {
     const first = g.buses[0];
     const next = g.buses[1];
-    const sub = first.distancia_metros ? `a ${fmtDist(first.distancia_metros)}` : '';
+    // #8 Si el bus está pegado a la parada (p. ej. 10 m) pero TUSSAM da varios minutos, suele estar
+    //    parado en cabecera; no mostramos la distancia para que no parezca un error ("a 10 m · 6 min").
+    const distIncoherente = first.distancia_metros != null && first.distancia_metros < 50 && first.tiempo_minutos >= 3;
+    const sub = (!first.distancia_metros || distIncoherente) ? '' : `a ${fmtDist(first.distancia_metros)}`;
     const label = `Línea ${g.linea} hacia ${g.destino}: ${first.tiempo_minutos <= 0 ? 'llegando' : first.tiempo_minutos + ' minutos'}${next ? `, el siguiente en ${next.tiempo_minutos} minutos` : ''}`;
     const av = codigo ? ` data-av="${esc(JSON.stringify([codigo, g.linea, g.destino, first.tiempo_minutos, safeColor(g.color, '#555555')]))}" role="button" tabindex="0"` : '';
     const bell = codigo && window.avisos?.find?.(codigo, g.linea, g.destino) ? '<span class="bell" title="Aviso activo">🔔</span>' : '';
@@ -674,7 +677,7 @@ function createMap(el, center, zoom) {
   try {
     m = new maplibregl.Map({
       container: el, style: styleUrl(), center: ll(center), zoom,
-      attributionControl: false, dragRotate: false, pitchWithRotate: false, touchPitch: false, maxPitch: 0,
+      attributionControl: false, dragRotate: true, pitchWithRotate: false, touchPitch: false, maxPitch: 0,
       fadeDuration: 0, renderWorldCopies: false, maxTileCacheSize: 120, refreshExpiredTiles: false,
       maxBounds: [[-6.35, 37.15], [-5.65, 37.6]], minZoom: 10,
     });
@@ -682,8 +685,8 @@ function createMap(el, center, zoom) {
     el.innerHTML = '<div class="map-fallback">No se ha podido abrir el mapa (el móvil no admite WebGL).</div>';
     return null;
   }
-  m.touchZoomRotate.disableRotation();
-  m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  m.touchZoomRotate.enableRotation();   // girar el mapa con dos dedos
+  m.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), 'top-right');   // brújula: tócala para volver a poner el norte arriba
   el.insertAdjacentHTML('beforeend', '<span class="osm-credito">© OpenStreetMap</span>');
   const data = new Map();        // id -> geojson
   const installers = [];
@@ -1146,9 +1149,12 @@ function bindSheetGestures(sheet) {
     y0 = null;
     if (Math.abs(dy) < 6) return;   // ha sido un toque, no un arrastre
     const sn = snaps();
-    let destino = sn.reduce((best, v) => (Math.abs(v - y) < Math.abs(best - y) ? v : best), sn[0]);
-    if (vel > 0.5) destino = sn.find((v) => v > ys + 4) ?? sn[2];
-    if (vel < -0.5) destino = [...sn].reverse().find((v) => v < ys - 4) ?? 0;
+    // El destino se calcula desde la posición ACTUAL (y), no desde donde empezó el arrastre:
+    // así, al bajar la hoja del todo, se queda abajo en vez de rebotar a la mitad.
+    let destino;
+    if (vel > 0.5) destino = sn.find((v) => v > y + 4) ?? sn[sn.length - 1];        // lanzada hacia abajo → siguiente tope por debajo (o el más bajo)
+    else if (vel < -0.5) destino = [...sn].reverse().find((v) => v < y - 4) ?? sn[0]; // lanzada hacia arriba → siguiente tope por encima (o arriba del todo)
+    else destino = sn.reduce((best, v) => (Math.abs(v - y) < Math.abs(best - y) ? v : best), sn[0]); // sin impulso → el tope más cercano
     poner(destino);
   };
   for (const zone of [$('#sh-grip'), $('#sh-head')]) {
@@ -1450,13 +1456,24 @@ views.linea = (el, numero) => {
         ${backHead(`<div class="grow" style="display:flex;gap:12px;align-items:flex-start"><div style="margin-top:6px">${badge(l.numero, lc)}</div><div style="min-width:0"><h2 style="margin-top:4px">${esc(l.nombre)}</h2><p id="l-horario"></p></div></div>`)}
         ${window.avisosTussam?.bannerHTML([l.numero]) || ''}
         ${sentidos.length > 1 ? `<div class="seg" role="group" aria-label="Sentido">${sentidos.map((s) => `<button type="button" data-s="${s}" aria-pressed="${s === sentido}">${esc(segLabel(s))}</button>`).join('')}</div>` : ''}
-        <div><div class="map-box" id="l-map"></div><p class="live-note" id="l-live"></p></div>
+        <div><div class="map-wrap"><div class="map-box" id="l-map"></div>
+          <button class="map-buses-btn" type="button" id="l-buses" aria-pressed="${settings.liveLines}" aria-label="${settings.liveLines ? 'Ocultar los autobuses en directo' : 'Ver los autobuses en directo'}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4 11h16M8 21v-3M16 21v-3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="8" cy="14.5" r="1.1" fill="currentColor"/><circle cx="16" cy="14.5" r="1.1" fill="currentColor"/><path class="tachon" d="M3 3l18 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button></div><p class="live-note" id="l-live"></p></div>
         <a class="btn ghost block" href="#mapa" id="l-open-map">${ICON.route}Ver en el mapa grande</a>
         <p class="live-note" style="margin:0"><img class="lg-busimg" src="${busImg()}" alt="" style="height:16px;vertical-align:-3px"> = parada a la que se acerca un autobús (y los minutos que le faltan) · Nº = número de la parada (el del poste)</p>
         <ol class="timeline" id="l-stops" style="--lc:${lc}"></ol>
       </div>`;
       $('.back-btn', el).onclick = goBack;
       $('#l-open-map', el).onclick = (e) => { e.preventDefault(); mapState.sentido = sentido; chooseMapLine(l.numero); };
+      // #25 Botón para encender/apagar los autobuses en directo también en la pestaña Líneas
+      $('#l-buses', el).onclick = () => {
+        settings.liveLines = !settings.liveLines; saveSettings(); vibrar(12);
+        const on = settings.liveLines, b = $('#l-buses', el);
+        b.setAttribute('aria-pressed', String(on));
+        b.setAttribute('aria-label', on ? 'Ocultar los autobuses en directo' : 'Ver los autobuses en directo');
+        pintarBotonBuses();   // mantiene en sincronía el botón del mapa principal
+        toast(on ? 'Autobuses en directo activados' : 'Autobuses en directo desactivados');
+        if (ctl && bm) bm.ready.then(() => { if (!dead) ctl.show(l, sentido); }); else drawTimeline([]);
+      };
       bm = createMap($('#l-map', el), SEVILLA, 12);
       /* Nombre en dos líneas: «Camino de los Descubrimientos» y debajo «Torre Sevilla» */
       const partirNombre = (n) => { const m = String(n).match(/^(.*?)\s*\(([^()]+)\)\s*$/); return m ? [m[1], m[2]] : [String(n), '']; };
