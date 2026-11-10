@@ -96,15 +96,36 @@ function textoParaVoz(nombre, tiempos) {
   }).join(' ');
 }
 async function hablar(texto) {
-  try {
-    if (plugin('TextToSpeech')) {
+  // 1) Plugin nativo (lo mejor en Android). Si falla —p. ej. el móvil no tiene instalada la voz
+  //    en español—, no damos error: probamos con la voz del navegador.
+  if (plugin('TextToSpeech')) {
+    try {
       await native('TextToSpeech', 'stop').catch(() => null);
       await native('TextToSpeech', 'speak', { text: texto, lang: 'es-ES', rate: 1.0, pitch: 1.0, volume: 1.0, category: 'ambient' });
-    } else if (window.speechSynthesis) {
+      return;
+    } catch { /* seguimos con el navegador */ }
+  }
+  // 2) Voz del WebView. Elegimos una voz en español si la hay; si no, se usa la que haya.
+  if (window.speechSynthesis) {
+    try {
       speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(texto); u.lang = 'es-ES'; speechSynthesis.speak(u);
-    } else toast('Este móvil no permite leer en voz alta.');
-  } catch { toast('No se ha podido leer en voz alta. Revisa que el móvil tenga instalada la voz en español.'); }
+      let dicho = false;
+      const decir = () => {
+        if (dicho) return; dicho = true;
+        const voz = (speechSynthesis.getVoices() || []).find((v) => /^es/i.test(v.lang || '')) || null;
+        const u = new SpeechSynthesisUtterance(texto);
+        u.lang = voz?.lang || 'es-ES';
+        if (voz) u.voice = voz;
+        u.onerror = (ev) => { if (ev.error && ev.error !== 'canceled' && ev.error !== 'interrupted') toast('No se ha podido leer en voz alta. Instala una voz en español en los ajustes del móvil (Accesibilidad → Texto a voz).'); };
+        speechSynthesis.speak(u);
+      };
+      // getVoices() puede venir vacío la primera vez hasta que el motor carga las voces
+      if ((speechSynthesis.getVoices() || []).length) decir();
+      else { speechSynthesis.addEventListener('voiceschanged', decir, { once: true }); setTimeout(decir, 300); }
+      return;
+    } catch { /* cae al aviso final */ }
+  }
+  toast('Este móvil no permite leer en voz alta.');
 }
 
 /* ================================================================== */

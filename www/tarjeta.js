@@ -24,6 +24,12 @@ const tipoDeTarjeta = (c, res) => res?.tipo || c?.ultimo?.tipo || c?.tipo || nul
 const tipoDetectado = (c, res) => res?.tipo || c?.ultimo?.tipo || null;
 const tipoDeTitulo = (t) => (t ? TIPOS.find((x) => x.re.test(t)) || null : null);
 const TIPO_GENERICO = { colores: ['#3a3f4b', '#16181d'] };
+/* Solo los bonobús de saldo (con/sin transbordo) llevan saldo monedero.
+   Si no sabemos el tipo pero hay saldo real (>0), también lo tratamos como de saldo. */
+const TIPOS_SALDO = new Set(['con-transbordo', 'sin-transbordo']);
+const llevaSaldo = (tipoId, saldo) => TIPOS_SALDO.has(tipoId) || (!tipoId && saldo != null && saldo > 0);
+/* Fechas centinela que TUSSAM usa para «no caduca» / «sin fin» */
+const fechaCentinela = (x) => !!x && /(^|\D)31[/-]12[/-]20(63|99)\b/.test(String(x));
 
 const tarjeta = {
   nfc: () => !!window.Capacitor?.isPluginAvailable?.('TarjetaNfc'),
@@ -119,14 +125,17 @@ const tarjeta = {
   desdeApi(j, num) {
     const titulo = j?.nombreTitulo ? String(j.nombreTitulo).trim() : null;
     const saldo = j?.saldoMonedero != null ? Math.round(Number(j.saldoMonedero)) / 1000 : null;   // viene en milésimas de euro
-    const cadTxt = [j?.caducidad, j?.finValidez].find((x) => x && String(x).trim()) || null;
-    const sinCad = !!cadTxt && /(^|\D)31[/-]12[/-]2063\b/.test(String(cadTxt));                    // TussApp lo trata como «no caduca»
-    const f = !sinCad && cadTxt ? String(cadTxt).match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/) : null;
+    const cadRaw = [j?.caducidad, j?.finValidez].find((x) => x && String(x).trim()) || null;
+    const sinCad = fechaCentinela(cadRaw) || (!!cadRaw && /sin\s*caducidad/i.test(String(cadRaw)));   // TussApp trata 31/12/2063 como «no caduca»
+    const cadTxt = sinCad ? null : cadRaw;
+    const f = cadTxt ? String(cadTxt).match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/) : null;
     const caducaEl = f ? new Date(Number(f[3].length === 2 ? '20' + f[3] : f[3]), Number(f[2]) - 1, Number(f[1])).getTime() : null;
     const extra = [];
     if (j?.saldoViajes != null) extra.push(['Viajes en la tarjeta', String(j.saldoViajes)]);
     if (j?.ultimaOperacion) extra.push(['Última operación', String(j.ultimaOperacion)]);
-    if (j?.inicioValidez) extra.push(['Válida desde', String(j.inicioValidez)]);
+    // Validez: solo si viene y no es una fecha centinela («hasta» solo si no coincide ya con la caducidad)
+    if (j?.inicioValidez && !fechaCentinela(j.inicioValidez)) extra.push(['Válida desde', String(j.inicioValidez)]);
+    if (j?.finValidez && !fechaCentinela(j.finValidez) && String(j.finValidez) !== String(cadRaw)) extra.push(['Válida hasta', String(j.finValidez)]);
     if (j?.inicioAmpliacion || j?.finAmpliacion) extra.push(['Ampliación', [j.inicioAmpliacion, j.finAmpliacion].filter(Boolean).join(' – ')]);
     const ok = j?.numeroSerie != null || saldo != null || !!titulo;
     return {
@@ -189,10 +198,16 @@ function tcardHTML(num, c, res, { mini = false } = {}) {
   const saldo = res?.saldo ?? c?.ultimo?.saldo;
   const sinSaldo = (res || c?.ultimo)?.sinSaldoWeb;
   const titulo = tipo?.nombre || res?.titulo || c?.ultimo?.titulo || 'Tarjeta TUSSAM';
+  // Solo se enseña el saldo (o «— €») en tarjetas de saldo; en abonos/pases no, para que no salga «— €»
+  const mostrarSaldo = llevaSaldo(tipoId, saldo);
+  const saldoHTML = mostrarSaldo && saldo != null ? `<div class="tc-saldo">${fmtEuro(saldo)}</div>`
+    : sinSaldo ? '<div class="tc-saldo tc-dim tc-sinsaldo">Sin saldo en la web</div>'
+    : mostrarSaldo ? '<div class="tc-saldo tc-dim">— €</div>'
+    : '';
   return `<div class="tcard${mini ? ' mini' : ''}" style="${cardBackground(c || { num }, tipoId)}">
     ${tarjeta.foto(num) ? '' : ondas}
     <div class="tc-top"><span class="tc-brand">${esc(c?.name || titulo)}</span>${ICON.nfc}</div>
-    <div class="tc-mid">${saldo != null ? `<div class="tc-saldo">${fmtEuro(saldo)}</div>` : sinSaldo ? '<div class="tc-saldo tc-dim tc-sinsaldo">Sin saldo en la web</div>' : '<div class="tc-saldo tc-dim">— €</div>'}
+    <div class="tc-mid">${saldoHTML}
       <div class="tc-tipo">${esc(c?.name ? titulo : (res?.titulo || c?.ultimo?.titulo || titulo))}</div></div>
     <div class="tc-num">${esc(tarjeta.fmt(num))}</div></div>`;
 }
@@ -305,34 +320,9 @@ views.tarjeta = (el) => {
     }
     pintar();
   }
-  /* Como la app oficial: abre la web de recargas en el navegador y, al volver, deja apuntar el saldo */
+  /* Como la app oficial: abre la web de recargas en el navegador. (Ya no se pregunta el saldo al volver.) */
   function abrirOficial(num) {
     openWeb(tarjeta.url(num));
-    const alVolver = () => {
-      resumeHandlers.delete(alVolver);
-      if (dead || detalle?.num !== num) return;
-      setTimeout(() => apuntarSaldo(num), 400);
-    };
-    resumeHandlers.add(alVolver);
-  }
-  function apuntarSaldo(num) {
-    const c = tarjeta.get(num);
-    openModal(`<h2>¿Qué saldo te ha salido?</h2><p class="help">Escríbelo y BusSev lo guardará${c ? ' y comprobará tus avisos' : ''}. Si no lo has visto, cierra esta ventana.</p>
-      <form id="as-f" class="field"><label for="as-v">Saldo monedero (€)</label><input id="as-v" inputmode="decimal" autocomplete="off" placeholder="Por ejemplo 5,90" maxlength="7"></form>
-      <div class="actions"><button class="btn ghost" type="button" id="as-no">Cerrar</button><button class="btn" type="submit" form="as-f">Guardar</button></div>`, (m, close) => {
-      $('#as-no', m).onclick = close;
-      $('#as-f', m).onsubmit = (e) => {
-        e.preventDefault();
-        const v = Number(String($('#as-v', m).value).replace(',', '.').replace(/[^\d.-]/g, ''));
-        if (!Number.isFinite(v) || v < 0 || v > 500) { toast('Escribe una cantidad válida, por ejemplo 5,90'); return; }
-        const base = c?.ultimo || {};
-        const res = { ok: true, saldo: Math.round(v * 100) / 100, tipo: base.tipo || null, titulo: base.titulo || null, caducidad: base.caducidad || null, caducaEl: base.caducaEl || null, sinCaducidad: !!base.sinCaducidad, fecha: Date.now(), manual: true };
-        if (c) aplicarConsulta(num, res);
-        detalle = { ...detalle, res, err: null, code: null };
-        close(); vibrar(30); toast('Saldo apuntado'); pintar();
-      };
-      setTimeout(() => $('#as-v', m)?.focus(), 150);
-    });
   }
   function abrir(num, { consultar: c = false } = {}) {
     detalle = { num, res: null, loading: false };
@@ -348,7 +338,9 @@ views.tarjeta = (el) => {
     const filas = [];
     const tipoId = tipoDeTarjeta(c, u);
     if (u) {
-      filas.push(['Saldo', u.saldo != null ? fmtEuro(u.saldo) : u.sinSaldoWeb ? 'TUSSAM no lo muestra' : '—']);
+      // El saldo solo tiene sentido en bonobús de saldo; en abonos/pases no se muestra
+      if (llevaSaldo(tipoId, u.saldo)) filas.push(['Saldo', u.saldo != null ? fmtEuro(u.saldo) : '—']);
+      else if (u.sinSaldoWeb) filas.push(['Saldo', 'TUSSAM no lo muestra']);
       filas.push(['Tipo', tipoPorId(tipoId)?.nombre || u.titulo || '—']);
       if (u.titulo && tipoPorId(tipoId)) filas.push(['Título en TUSSAM', u.titulo]);
       filas.push(['Caducidad', u.sinCaducidad ? 'No caduca' : (u.caducidad || '—')]);
@@ -388,7 +380,7 @@ views.tarjeta = (el) => {
         ${viajes != null ? `<div><span>Viajes que te quedan</span><b>${viajes} ${viajes === 1 ? 'viaje' : 'viajes'}</b></div>` : ''}</div>
       <p class="small muted" style="margin:0">TUSSAM tarda hasta 24 h en descontar viajes y sumar recargas.</p>
       <button class="btn block" type="button" id="t-oficial">🌐 Ver el saldo en la web de TUSSAM</button>
-      <p class="small muted" style="margin:-6px 0 0">Igual que la app oficial: se abre la web de recargas con tu tarjeta. Al volver, puedes apuntar el saldo para que BusSev lo recuerde y te avise.</p>
+      <p class="small muted" style="margin:-6px 0 0">Se abre la web de recargas de TUSSAM con tu tarjeta, por si quieres recargar o ver el saldo oficial.</p>
       <div class="btn-row">
         <button class="btn ghost" type="button" id="t-again" ${loading ? 'disabled' : ''}>Actualizar</button>
         ${c ? '<button class="btn ghost" type="button" id="t-edit">Personalizar</button>' : '<button class="btn" type="button" id="t-save">Guardar tarjeta</button>'}
@@ -399,19 +391,26 @@ views.tarjeta = (el) => {
     const s = c.avisoSaldo || { on: false, importe: 3 };
     const k = c.avisoCaducidad || { on: false, dias: [15, 3] };
     const sinCad = u?.sinCaducidad;
-    return `<h2 class="section-title">Avisos</h2>
-      <div class="set-group" ${u?.sinSaldoWeb ? 'hidden' : ''}>
+    const tipoId = tipoDeTarjeta(c, u);
+    const conSaldo = llevaSaldo(tipoId, u?.saldo) && !u?.sinSaldoWeb;   // solo bonobús de saldo
+    // Saldo bajo: solo si la tarjeta lleva saldo
+    const grupoSaldo = conSaldo ? `
+      <div class="set-group">
         <div class="switch-row"><div><h3>Saldo bajo</h3><p>Te aviso cuando el saldo baje de la cantidad que elijas.</p></div><input class="switch" type="checkbox" id="av-s" ${s.on ? 'checked' : ''} aria-label="Aviso de saldo bajo"></div>
         <div class="field" ${s.on ? '' : 'hidden'} id="av-s-box"><label for="av-s-imp">Avisarme si baja de</label>
           <div class="chips-wrap">${[2, 3, 5, 10].map((v) => `<button class="chip" type="button" data-imp="${v}" aria-pressed="${Number(s.importe) === v}">${v} €</button>`).join('')}
           <input id="av-s-imp" class="mini-input" inputmode="decimal" aria-label="Otra cantidad" placeholder="Otra" value="${[2, 3, 5, 10].includes(Number(s.importe)) ? '' : String(s.importe || '').replace('.', ',')}"></div></div>
-      </div>
+      </div>` : '';
+    // Caducidad: solo si la tarjeta caduca
+    const grupoCad = sinCad ? '' : `
       <div class="set-group">
-        <div class="switch-row"><div><h3>Caducidad</h3><p>${sinCad ? 'Esta tarjeta no caduca, así que no hace falta este aviso.' : u?.caducaEl ? `Caduca el ${new Date(u.caducaEl).toLocaleDateString('es-ES')}. Te aviso con antelación.` : 'Te aviso unos días antes de que caduque (cuando TUSSAM dé la fecha).'}</p></div>
-          <input class="switch" type="checkbox" id="av-c" ${k.on && !sinCad ? 'checked' : ''} ${sinCad ? 'disabled' : ''} aria-label="Recordatorio de caducidad"></div>
-        <div class="field" ${k.on && !sinCad ? '' : 'hidden'} id="av-c-box"><label>Avisarme antes</label>
+        <div class="switch-row"><div><h3>Caducidad</h3><p>${u?.caducaEl ? `Caduca el ${new Date(u.caducaEl).toLocaleDateString('es-ES')}. Te aviso con antelación.` : 'Te aviso unos días antes de que caduque (cuando TUSSAM dé la fecha).'}</p></div>
+          <input class="switch" type="checkbox" id="av-c" ${k.on ? 'checked' : ''} aria-label="Recordatorio de caducidad"></div>
+        <div class="field" ${k.on ? '' : 'hidden'} id="av-c-box"><label>Avisarme antes</label>
           <div class="chips-wrap">${[30, 15, 7, 3, 1].map((d) => `<button class="chip" type="button" data-dia="${d}" aria-pressed="${(k.dias || []).includes(d)}">${d === 1 ? '1 día' : d + ' días'}</button>`).join('')}</div></div>
       </div>`;
+    if (!grupoSaldo && !grupoCad) return '';
+    return `<h2 class="section-title">Avisos</h2>${grupoSaldo}${grupoCad}`;
   }
   function inicioHTML() {
     const cards = tarjeta.list();
@@ -424,7 +423,7 @@ views.tarjeta = (el) => {
           ${tcardHTML(c.num, c, null, { mini: true })}
           <span class="card-btn-sub">${c.ultimo?.fecha ? `${c.avisoSaldo?.on && c.ultimo.saldo != null && c.ultimo.saldo < Number(c.avisoSaldo.importe) ? '⚠ Saldo bajo · ' : ''}Actualizada ${haceCuanto(c.ultimo.fecha)}` : 'Toca para consultar'}</span></button>`).join('')}</div>`
       : `<div class="empty" style="padding:16px">${ICON.nfc}<h2>Añade tu tarjeta</h2><p>${tarjeta.nfc() ? 'Acércala al móvil o escribe su número.' : 'Escribe el número que tiene detrás.'}</p></div>`}
-      <button class="btn ghost block" type="button" id="t-add">+ Añadir tarjeta escribiendo el número</button>
+      <button class="btn ghost block" type="button" id="t-add">+ Añadir tarjeta por su número</button>
       <a class="btn ghost block" href="#tarifas">💶 Tarifas y títulos de viaje</a>`;
   }
   function pintar() {
@@ -452,13 +451,15 @@ views.tarjeta = (el) => {
     const c = tarjeta.get(num);
     if (!c) return;
     const guardarAv = (patch) => { tarjeta.update(num, patch); window.avisosTarjeta?.comprobar(num); };
-    $('#av-s', el).onchange = async (e) => {
+    const avS = $('#av-s', el);
+    if (avS) avS.onchange = async (e) => {
       if (e.target.checked && !(await window.avisos?.permisoOk?.())) { e.target.checked = false; return; }
       guardarAv({ avisoSaldo: { ...(c.avisoSaldo || { importe: 3 }), on: e.target.checked } }); pintar();
     };
     el.querySelectorAll('[data-imp]').forEach((b) => { b.onclick = () => { guardarAv({ avisoSaldo: { on: true, importe: Number(b.dataset.imp) } }); pintar(); }; });
     $('#av-s-imp', el)?.addEventListener('change', (e) => { const v = Number(String(e.target.value).replace(',', '.')); if (v > 0 && v < 500) { guardarAv({ avisoSaldo: { on: true, importe: Math.round(v * 100) / 100 } }); pintar(); } });
-    $('#av-c', el).onchange = async (e) => {
+    const avC = $('#av-c', el);
+    if (avC) avC.onchange = async (e) => {
       if (e.target.checked && !(await window.avisos?.permisoOk?.())) { e.target.checked = false; return; }
       guardarAv({ avisoCaducidad: { ...(c.avisoCaducidad || { dias: [15, 3] }), on: e.target.checked } }); pintar();
     };
@@ -502,14 +503,11 @@ views.tarjeta = (el) => {
     const detect = tipoDetectado(c, detalle?.res?.ok ? detalle.res : null);   // si TUSSAM dice el tipo, no se puede cambiar
     const originalFondo = tarjeta.foto(num);
     const preview = (m) => {
-      $('#c-prev', m).innerHTML = tcardHTML(num, { ...c, name: $('#c-name', m).value, color, tipo: detect ? '' : ($('#c-tipo', m)?.value || '') }, detalle?.res?.ok ? detalle.res : null, { mini: true });
+      $('#c-prev', m).innerHTML = tcardHTML(num, { ...c, name: $('#c-name', m).value, color, tipo: detect ? '' : (c.tipo || '') }, detalle?.res?.ok ? detalle.res : null, { mini: true });
     };
     openModal(`<h2>${nueva ? 'Guardar tarjeta' : 'Personalizar tarjeta'}</h2>
       <div id="c-prev"></div>
       <div class="field"><label for="c-name">Nombre</label><input id="c-name" maxlength="24" placeholder="Por ejemplo: Mía, Mamá, Trabajo" value="${esc(c.name || '')}"></div>
-      ${detect
-        ? `<div class="field"><label>Tipo de tarjeta</label><div class="tipo-fijo"><b>${esc(tipoPorId(detect)?.nombre || '')}</b><span>🔒 Lo dice TUSSAM</span></div></div>`
-        : `<div class="field"><label for="c-tipo">Tipo de tarjeta</label><select id="c-tipo"><option value="">Sin indicar</option>${TIPOS.map((t) => `<option value="${t.id}" ${c.tipo === t.id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select><p class="help">TUSSAM no dice el tipo de esta tarjeta, así que puedes elegirlo tú.</p></div>`}
       <div class="field"><label>Color</label>${swatchesHTML(color, 'data-cc')}<p class="help">Si no eliges ninguno, se usa el diseño de su tipo.</p></div>
       <div class="field"><label>Foto de fondo</label>
         <div class="btn-row"><label class="btn ghost" for="c-foto" style="cursor:pointer">Elegir foto de fondo</label><button class="btn ghost" type="button" id="c-sinfoto">Quitar</button></div>
@@ -519,7 +517,6 @@ views.tarjeta = (el) => {
     (m, close) => {
       preview(m);
       $('#c-name', m).oninput = () => preview(m);
-      $('#c-tipo', m)?.addEventListener('change', () => preview(m));
       m.querySelectorAll('[data-cc]').forEach((b) => { b.onclick = () => {
         color = color === b.dataset.cc ? '' : b.dataset.cc;
         m.querySelectorAll('[data-cc]').forEach((x) => { const on = x.dataset.cc === color; x.setAttribute('aria-pressed', on); x.innerHTML = on ? ICON.check : ''; });
@@ -535,7 +532,7 @@ views.tarjeta = (el) => {
         const base = tarjeta.get(num) || {};
         const r = detalle?.res?.ok ? detalle.res : null;
         const { precio: _sinPrecio, ...resto } = base;   // el precio ya no se escribe a mano: sale de las tarifas de TUSSAM
-        tarjeta.save({ ...resto, num, name: $('#c-name', m).value.trim().slice(0, 24), color, tipo: detect ? '' : ($('#c-tipo', m)?.value || ''),
+        tarjeta.save({ ...resto, num, name: $('#c-name', m).value.trim().slice(0, 24), color, tipo: detect ? '' : (c.tipo || ''),
           ultimo: base.ultimo || (r ? { saldo: r.saldo, tipo: r.tipo, titulo: r.titulo, caducidad: r.caducidad, caducaEl: r.caducaEl, sinCaducidad: r.sinCaducidad, sinSaldoWeb: r.sinSaldoWeb, fecha: r.fecha } : undefined) });
         close(); toast(nueva ? 'Tarjeta guardada' : 'Cambios guardados'); pintar();
       };

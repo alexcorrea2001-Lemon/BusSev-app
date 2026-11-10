@@ -340,7 +340,7 @@ const actualizaciones = {
   /* «v1.1.2» → [1,1,2] */
   partes(t) { const m = String(t || '').match(/(\d+)\.(\d+)\.(\d+)/); return m ? m.slice(1).map(Number) : null; },
   comparar(a, b) { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i]; return 0; },
-  nombre() { const v = this.version(); return v.version ? `v${v.version}` : (v.build ? `compilación ${v.build}` : 'de prueba'); },
+  nombre() { const v = this.version(); return v.version ? `v${v.version}` : 'de prueba'; },
   async buscar() {
     const v = this.version();
     if (!/^[\w.-]+\/[\w.-]+$/.test(v.repo || '')) return { estado: 'sin-repo' };
@@ -573,7 +573,7 @@ async function editFavorite(codigo, onDone) {
       if (!box) return;
       const l = favs.list();
       const i = l.findIndex((f) => f.codigo === codigo);
-      box.innerHTML = l.map((f, j) => `<li class="${f.codigo === codigo ? 'yo' + (animar ? ' movido' : '') : ''}"><span class="o-n">${j + 1}</span><span class="o-t">${esc(f.alias || f.nombre)}</span>${f.codigo === codigo ? '<span class="o-yo">esta</span>' : ''}</li>`).join('');
+      box.innerHTML = l.map((f, j) => `<li class="${f.codigo === codigo ? 'yo' + (animar ? ' movido' : '') : ''}"><span class="o-n">${j + 1}</span><span class="o-t">${esc(f.alias || f.nombre)}</span></li>`).join('');
       $('#fv-pos', m).textContent = `· ${i + 1} de ${l.length}`;
       const [sube, baja] = [m.querySelector('[data-mv="-1"]'), m.querySelector('[data-mv="1"]')];
       if (sube) sube.disabled = i <= 0;
@@ -1452,7 +1452,7 @@ views.linea = (el, numero) => {
         ${sentidos.length > 1 ? `<div class="seg" role="group" aria-label="Sentido">${sentidos.map((s) => `<button type="button" data-s="${s}" aria-pressed="${s === sentido}">${esc(segLabel(s))}</button>`).join('')}</div>` : ''}
         <div><div class="map-box" id="l-map"></div><p class="live-note" id="l-live"></p></div>
         <a class="btn ghost block" href="#mapa" id="l-open-map">${ICON.route}Ver en el mapa grande</a>
-        <p class="live-note" style="margin:0">🚌 = autobús que va hacia esa parada · Nº = número de la parada (el del poste)</p>
+        <p class="live-note" style="margin:0"><img class="lg-busimg" src="${busImg()}" alt="" style="height:16px;vertical-align:-3px"> = parada a la que se acerca un autobús (y los minutos que le faltan) · Nº = número de la parada (el del poste)</p>
         <ol class="timeline" id="l-stops" style="--lc:${lc}"></ol>
       </div>`;
       $('.back-btn', el).onclick = goBack;
@@ -1481,7 +1481,7 @@ views.linea = (el, numero) => {
           const llega = !bs.length ? '' : mins[0] <= 0 ? 'llegando' : `${mins.filter((x) => x > 0).slice(0, 2).join(' · ')} min`;
           const [nom, sub] = partirNombre(p.nombre);
           const otras = lpp.get(p.codigo) || [];
-          return `<li><a href="#parada-${esc(p.codigo)}"><span class="dot${bs.length ? ' bus' : ''}"></span><span class="tl-txt"><b>${esc(nom)}</b>${sub ? `<span class="tl-sub">${esc(sub)}</span>` : ''}${otras.length ? `<span class="tl-lineas">${otras.slice(0, 8).map((n) => badge(etiquetaLinea(n), lineaFor(n)?.color, { sm: true })).join('')}${otras.length > 8 ? `<span class="tl-mas">+${otras.length - 8}</span>` : ''}</span>` : ''}</span><span class="tl-der">${bs.length ? `<span class="bus-tag">🚌 ${llega}</span>` : ''}<span class="num-tag">Nº ${esc(p.codigo)}</span></span></a></li>`;
+          return `<li><a href="#parada-${esc(p.codigo)}"><span class="dot${bs.length ? ' bus' : ''}"></span><span class="tl-txt"><b>${esc(nom)}</b>${sub ? `<span class="tl-sub">${esc(sub)}</span>` : ''}${otras.length ? `<span class="tl-lineas">${otras.slice(0, 8).map((n) => badge(etiquetaLinea(n), lineaFor(n)?.color, { sm: true })).join('')}${otras.length > 8 ? `<span class="tl-mas">+${otras.length - 8}</span>` : ''}</span>` : ''}</span><span class="tl-der">${bs.length ? `<span class="bus-tag">${llega}</span>` : ''}<span class="num-tag">Nº ${esc(p.codigo)}</span></span></a></li>`;
         }).join('') || '<li class="board-empty">No hay paradas para este sentido.</li>';
       };
       if (bm) {
@@ -1774,18 +1774,18 @@ views.ajustes = (el) => {
         <p>Guarda tus favoritas, tarjetas y ajustes en un archivo para no perderlos si cambias de móvil.</p>
         <div class="btn-row"><button class="btn ghost" type="button" id="s-exp">Guardar copia</button><label class="btn ghost" for="s-imp" style="cursor:pointer">Recuperar copia</label></div>
         <input type="file" id="s-imp" accept="application/json,.json" hidden></div>
-      <div class="set-group"><h3>Privacidad y seguridad</h3>
-        <p>BusSev solo se conecta con TUSSAM (tiempos, saldo y avisos), con OpenFreeMap (mapa) y, si lo configuras, con tu propio servidor del saldo. No tiene anuncios ni seguimiento. Tus favoritas y tarjetas se guardan solo en este móvil.</p>
-        <p>Permisos: internet, ubicación (opcional), NFC (solo con la pestaña Tarjeta abierta) y notificaciones (solo si activas algún aviso).</p></div>
       <h2 class="section-title">Actualizaciones</h2>
       <div class="set-group">
         <div class="ver-fila"><div><h3>BusSev ${esc(actualizaciones.nombre())}</h3>
-          <p>${actualizaciones.version().fecha ? `Compilada el ${new Date(actualizaciones.version().fecha + 'T12:00').toLocaleDateString('es-ES')}${actualizaciones.version().build ? ` (compilación ${actualizaciones.version().build})` : ''}. ` : ''}Paradas y recorridos oficiales de TUSSAM${dc ? `, válidos hasta el <b>${dc.toLocaleDateString('es-ES')}</b>` : ''}.</p></div></div>
+          <p>${actualizaciones.version().fecha ? `Compilada el ${new Date(actualizaciones.version().fecha + 'T12:00').toLocaleDateString('es-ES')}. ` : ''}Paradas y recorridos oficiales de TUSSAM${dc ? `, válidos hasta el <b>${dc.toLocaleDateString('es-ES')}</b>` : ''}.</p></div></div>
         <div id="s-ver-res"></div>
         <button class="btn block" type="button" id="s-ver">🔄 Buscar actualización</button>
         <p>Cada versión nueva lleva ya los horarios y recorridos oficiales más recientes (GitHub los descarga solo del Punto de Acceso Nacional de Transportes, y el día 1 de cada mes revisa si TUSSAM ha publicado otros). Se instala encima, sin perder nada.</p>
         ${sw('avisarVersion', settings.avisarVersion, 'Avisarme si hay una versión nueva', 'Lo mira al abrir la app, como mucho una vez al día.')}
       </div>
+      <div class="set-group"><h3>Privacidad y seguridad</h3>
+        <p>BusSev solo se conecta con TUSSAM (tiempos, saldo y avisos), con OpenFreeMap (mapa) y, si lo configuras, con tu propio servidor del saldo. No tiene anuncios ni seguimiento. Tus favoritas y tarjetas se guardan solo en este móvil.</p>
+        <p>Permisos: internet, ubicación (opcional), NFC (solo con la pestaña Tarjeta abierta) y notificaciones (solo si activas algún aviso).</p></div>
       <div class="set-group"><h3>Datos de líneas y paradas</h3><p>Datos oficiales de TUSSAM ${dc ? `válidos hasta el ${dc.toLocaleDateString('es-ES')}` : ''}. ${window.BusSevBackend?.caducados?.() ? 'Ya han caducado: la app pide los recorridos a TUSSAM en directo.' : 'Cuando caduquen, la app pedirá los recorridos a TUSSAM en directo.'} Recorridos por calle: ${Object.keys(window.BUSSEV_RECORRIDOS || {}).length ? 'sí' : 'en línea recta'}. Mapas: © OpenStreetMap, OpenFreeMap, OpenMapTiles.</p>
         <p>BusSev es una app personal, sin relación con TUSSAM.</p></div>
     </div>`;
@@ -1911,6 +1911,7 @@ function show(name, arg) {
     document.querySelectorAll('.view-detail').forEach((v) => { v.innerHTML = ''; });
   }
   el.hidden = false; el.dataset.active = '1';
+  document.body.dataset.view = name;   // para ocultar el buscador en Ajustes (y lo que haga falta por pantalla)
   if (name !== 'mapa') el.scrollTop = 0;
   document.querySelectorAll('.tabbar a').forEach((a) => { if (a.dataset.tab === lastTab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   active = { name, cleanup: null, refresh: null, rerender: null, back: null };
