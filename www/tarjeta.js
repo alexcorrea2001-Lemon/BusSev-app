@@ -357,6 +357,7 @@ views.tarjeta = (el) => {
       ${tcardHTML(num, c, res?.ok ? res : null)}
       ${loading ? cargandoHTML('Consultando tu tarjeta en TUSSAM…', 'Puede tardar unos segundos.') : ''}
       ${bajo ? `<div class="alert warn">Te queda poco saldo: menos de ${fmtEuro(Number(c.avisoSaldo.importe))}.</div>` : ''}
+      ${viajes != null && viajes <= 2 && !u?.sinSaldoWeb ? `<div class="alert warn">${viajes === 0 ? 'Te has quedado sin viajes. Recarga antes de montar.' : viajes === 1 ? 'Te queda 1 viaje: con esto no llegas a la vuelta. Recarga pronto.' : 'Te quedan 2 viajes: justo para ir y volver una vez. Recarga pronto.'}</div>` : ''}
       ${u?.sinSaldoWeb ? '<div class="alert info">TUSSAM no muestra el saldo de esta tarjeta porque no se recarga por internet (por ejemplo, la Tarjeta Solidaria). Sí puedes ver aquí su caducidad.</div>' : ''}
       ${err ? `<div class="set-group"><h3>${code === 'CLOUDFLARE' ? 'Hace falta una comprobación' : 'No se ha podido consultar'}</h3><p>${esc(err)}</p>
         ${code === 'CLOUDFLARE' ? '<button class="btn" type="button" id="t-cf">Hacer la comprobación</button>' : '<button class="btn" type="button" id="t-again2">Reintentar</button>'}
@@ -410,7 +411,7 @@ views.tarjeta = (el) => {
           <div class="chips-wrap">${[30, 15, 7, 3, 1].map((d) => `<button class="chip" type="button" data-dia="${d}" aria-pressed="${(k.dias || []).includes(d)}">${d === 1 ? '1 día' : d + ' días'}</button>`).join('')}</div></div>
       </div>`;
     if (!grupoSaldo && !grupoCad) return '';
-    return `<h2 class="section-title">Avisos</h2>${grupoSaldo}${grupoCad}`;
+    return `<div class="tc-avisos"><h2 class="section-title">Avisos</h2>${grupoSaldo}${grupoCad}</div>`;
   }
   function inicioHTML() {
     const cards = tarjeta.list();

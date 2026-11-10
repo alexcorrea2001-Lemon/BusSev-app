@@ -83,7 +83,7 @@ function tematicaPorFecha(d = new Date()) {
   }
   return 'normal';
 }
-const tematicaActiva = () => (settings.tematicaAuto ? tematicaPorFecha() : (TEMATICAS[settings.tematica] ? settings.tematica : 'normal'));
+const tematicaActiva = () => (settings.modoSencillo ? 'normal' : (settings.tematicaAuto ? tematicaPorFecha() : (TEMATICAS[settings.tematica] ? settings.tematica : 'normal')));
 /* Festivos de Sevilla (nacionales + Andalucía + Jueves y Viernes Santo). En festivo y domingo
    TUSSAM circula con horario reducido; se avisa en Favoritas. Pueden faltar los 2 locales que
    fija el Ayuntamiento cada año, que cambian. */
@@ -114,9 +114,9 @@ function tarjetasBajasHTML() {
     if (typeof tarjeta === 'undefined' || !tarjeta.list) return '';
     const bajas = tarjeta.list().filter((c) => c.avisoSaldo?.on && c.ultimo && c.ultimo.saldo != null && c.ultimo.saldo < Number(c.avisoSaldo.importe));
     if (!bajas.length) return '';
-    return `<div class="set-group"><h3>💳 Saldo bajo</h3>${bajas.map((c) => {
+    return `<div class="set-group sb-group"><h3>⚠️ Saldo bajo</h3>${bajas.map((c) => {
       const nombre = esc(c.name || `Tarjeta ${tarjeta.fmt(c.num)}`);
-      return `<a class="row-flat sb-row" href="#tarjeta"><span class="sb-punto" style="background:${safeColor(c.color, 'var(--warn)')}"></span><div style="flex:1;min-width:0"><b>${nombre}</b><p class="help">Le quedan ${fmtEuro(c.ultimo.saldo)} · recárgala pronto</p></div>${ICON.chev}</a>`;
+      return `<a class="row-flat sb-row" href="#tarjeta"><span class="sb-punto"></span><div style="flex:1;min-width:0"><b>${nombre}</b><p class="help">Le quedan ${fmtEuro(c.ultimo.saldo)} · recárgala pronto</p></div>${ICON.chev}</a>`;
     }).join('')}</div>`;
   } catch { return ''; }
 }
@@ -256,6 +256,18 @@ function openWeb(url) {
   if (window.Capacitor?.isPluginAvailable?.('Browser')) {
     window.Capacitor.nativePromise('Browser', 'open', { url, toolbarColor: '#1c1d21' }).catch(() => { location.href = url; });
   } else location.href = url;
+}
+
+/* Descargar la actualización: abre GitHub y, al volver a la app (tras bajar/instalar el APK),
+   cierra esa pestaña del navegador para que no se quede abierta y vuelva a descargar al reabrirla. */
+function descargarApp(url) {
+  openWeb(url);
+  const onVis = () => {
+    if (document.visibilityState !== 'visible') return;
+    document.removeEventListener('visibilitychange', onVis);
+    setTimeout(() => { try { window.Capacitor?.nativePromise?.('Browser', 'close', {}); } catch { /* */ } }, 300);
+  };
+  document.addEventListener('visibilitychange', onVis);
 }
 
 const ICON = {
@@ -786,6 +798,7 @@ function aplicarCapasMapa(bm) {
   const m = bm.m;
   const vis = (id, on) => { try { if (m.getLayer(id)) m.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); } catch { /* */ } };
   vis('bs-stops', settings.mapaParadas !== false);
+  vis('bs-stops-hit', settings.mapaParadas !== false);
   for (const id of ['bs-route-casing', 'bs-route', 'bs-route-stops', 'bs-paths']) vis(id, settings.mapaRecorridos !== false);
   // Nombres de calles y sitios = las capas de texto del mapa base
   try { for (const l of m.getStyle()?.layers || []) if (l.type === 'symbol') m.setLayoutProperty(l.id, 'visibility', settings.mapaCalles !== false ? 'visible' : 'none'); } catch { /* */ }
@@ -802,9 +815,15 @@ async function addStopDots(bm, onClick) {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 1.6, 13, 2.6, 15, 4.2, 17, 6.5, 19, 8],
     'circle-color': '#e5303c', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 1.2], 'circle-stroke-color': mapIsDark() ? '#1d1f23' : '#ffffff',
   } });
-  bm.m.on('click', 'bs-stops', (e) => { const c = e.features?.[0]?.properties?.codigo; const p = c && cache.paradaByCode.get(String(c)); if (p) onClick(p); });
-  bm.m.on('mouseenter', 'bs-stops', () => { bm.m.getCanvas().style.cursor = 'pointer'; });
-  bm.m.on('mouseleave', 'bs-stops', () => { bm.m.getCanvas().style.cursor = ''; });
+  // Capa de toque invisible, más ancha que el punto: se toca mucho mejor sin que el punto se vea más grande.
+  bm.layer({ id: 'bs-stops-hit', type: 'circle', source: 'bs-stops', paint: {
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 9, 13, 11, 15, 13, 17, 16, 19, 18],
+    'circle-color': '#000000', 'circle-opacity': 0,
+  } });
+  const tocar = (e) => { const c = e.features?.[0]?.properties?.codigo; const p = c && cache.paradaByCode.get(String(c)); if (p) onClick(p); };
+  bm.m.on('click', 'bs-stops-hit', tocar);
+  bm.m.on('mouseenter', 'bs-stops-hit', () => { bm.m.getCanvas().style.cursor = 'pointer'; });
+  bm.m.on('mouseleave', 'bs-stops-hit', () => { bm.m.getCanvas().style.cursor = ''; });
 }
 /* Capas para recorrido de línea y caminos de los buses */
 function addRouteLayers(bm) {
@@ -1171,7 +1190,7 @@ views.favoritas = (el) => {
     el.__marco = marco;
     el.innerHTML = `<div class="stack view-anim"><div class="page-head row-between"><div><h1>Favoritas</h1><p>Tus paradas con los tiempos en directo.</p></div><a class="btn ghost sm" href="#ruta">${ICON.route}Cómo llegar</a></div>
       ${servicioHoyHTML()}
-      ${avs.length ? `<div class="set-group"><h3>Avisos de llegada</h3>${avs.map((a) => `<div class="row-flat">${badge(a.linea, lineaFor(a.linea)?.color, { sm: true })}<div style="flex:1;min-width:0"><b>${esc(a.parada)}</b><p class="help">Cuando falten ${a.antes} min · sobre las ${new Date(a.at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p></div><button class="back-btn" type="button" data-av-del="${a.id}" aria-label="Quitar aviso">${ICON.close}</button></div>`).join('')}</div>` : ''}
+      ${avs.length ? `<div class="set-group"><h3>Avisos de llegada</h3>${avs.map((a) => `<div class="row-flat"><a class="av-ll-link" href="#parada-${esc(a.codigo)}">${badge(a.linea, lineaFor(a.linea)?.color, { sm: true })}<div style="flex:1;min-width:0"><b>${esc(a.parada)}</b><p class="help">Cuando falten ${a.antes} min · sobre las ${new Date(a.at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p></div></a><button class="back-btn" type="button" data-av-del="${a.id}" aria-label="Quitar aviso">${ICON.close}</button></div>`).join('')}</div>` : ''}
       ${saludoFiestaHTML()}
       <div id="fav-noche">${nocturnasHTML()}</div>
       <div id="fav-avisos"></div>
@@ -1936,7 +1955,10 @@ views.ajustes = (el) => {
       render();
     }; });
     el.querySelectorAll('[data-sw]').forEach((b) => { b.onchange = () => {
-      settings[b.dataset.sw] = b.checked; saveSettings(); applyTheme(); render(); aplicarCapasMapa(mapState.bm);
+      settings[b.dataset.sw] = b.checked;
+      // Modo sencillo enciende «Reducir animaciones»; al quitarlo, se apaga.
+      if (b.dataset.sw === 'modoSencillo') settings.menosAnimaciones = b.checked;
+      saveSettings(); applyTheme(); render(); aplicarCapasMapa(mapState.bm);
     }; });
     el.querySelectorAll('[data-tem]').forEach((b) => { b.onclick = () => { settings.tematicaAuto = false; settings.tematica = b.dataset.tem; saveSettings(); applyTheme(); render(); }; });
     el.querySelectorAll('[data-color]').forEach((b) => { b.onclick = () => { settings.color = b.dataset.color; saveSettings(); applyTheme(); render(); }; });
@@ -1953,7 +1975,7 @@ views.ajustes = (el) => {
         const r = await actualizaciones.buscar();
         if (r.estado === 'nueva') {
           box.innerHTML = `<div class="ver-res nueva"><b>✨ ${r.mismoNombre ? `Hay una actualización de la ${esc(r.nueva)}` : `Hay una versión nueva: la ${esc(r.nueva)}`}</b><span>Descárgala e instálala encima de esta.</span><button class="btn" type="button" id="s-ver-bajar">Descargar</button></div>`;
-          $('#s-ver-bajar', el).onclick = () => openWeb(r.url);
+          $('#s-ver-bajar', el).onclick = () => descargarApp(r.url);
         } else if (r.estado === 'al-dia') {
           box.innerHTML = '<div class="ver-res"><b>✅ Tienes la última versión</b></div>';
         } else {
@@ -2083,6 +2105,8 @@ function route() {
   window.BusSevBackend?.cancelarFondo?.();   // lo que se buscaba en la pantalla anterior ya no hace falta
   if (searchEl.value) { searchEl.value = ''; $('#q-clear').hidden = true; }
   const h = decodeURIComponent(location.hash.slice(1));
+  // Modo sencillo: no hay Mapa, Cerca ni «Cómo llegar»; se redirige a Favoritas.
+  if (settings.modoSencillo && (h === 'mapa' || h === 'cerca' || h === 'ruta')) { history.replaceState(null, '', '#favoritas'); return show('favoritas'); }
   let m;
   if ((m = h.match(/^parada-(\d{1,7})$/))) return show('parada', m[1]);
   if ((m = h.match(/^linea-([A-Za-z0-9]{1,8})$/))) return show('linea', m[1]);
