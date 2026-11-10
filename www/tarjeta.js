@@ -299,7 +299,7 @@ views.tarjeta = (el) => {
     setTimeout(armarLector, 600);
   }
   function nfcEstadoHTML(st) {
-    if (st === 'on') return `<div class="nfc-on"><span class="pulse">${ICON.nfc}</span><div><b>Acerca tu tarjeta</b><small>Apóyala en la parte de atrás del móvil para ver su saldo.</small></div></div>`;
+    if (st === 'on') return `<div class="nfc-on"><span class="nfc-scan">${ICON.nfc}<i></i><i></i><i></i></span><div><b>Acerca tu tarjeta</b><small>Apóyala en la parte de atrás del móvil para ver su saldo.</small></div></div>`;
     if (st === 'off') return `<div class="nfc-off">${ICON.nfc}<div><b>El NFC está apagado</b><small>Enciéndelo y BusSev lo notará sola: no tienes que hacer nada más.</small></div><button class="btn sm" type="button" id="nfc-ajustes">Activar NFC</button></div>`;
     return `<div class="nfc-off">${ICON.nfc}<div><b>Este móvil no tiene NFC</b><small>Añade tu tarjeta escribiendo su número.</small></div></div>`;
   }

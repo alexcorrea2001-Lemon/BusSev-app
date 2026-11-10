@@ -375,7 +375,16 @@ const actualizaciones = {
     const r = await this.buscar().catch(() => null);
     if (r?.estado === 'nueva' && store.get('versionAvisada', '') !== r.clave) {
       store.set('versionAvisada', r.clave);
-      toast(r.mismoNombre ? 'Hay una actualización de BusSev. Mírala en Ajustes → Actualizaciones.' : `Hay una versión nueva de BusSev (${r.nueva}). Mírala en Ajustes → Actualizaciones.`);
+      // Pop-up de versión nueva (se puede desactivar aquí mismo o en Ajustes → «Avisarme si hay una versión nueva»)
+      openModal(`<h2>✨ Hay una versión nueva</h2>
+        <p class="help">${r.mismoNombre ? 'Hay una actualización de BusSev disponible.' : `BusSev ${esc(r.nueva)} ya está disponible.`} Se instala encima de la que tienes, sin perder tus favoritas ni tus tarjetas.</p>
+        <div class="actions"><button class="btn ghost" type="button" id="upd-no">Ahora no</button>${r.url ? '<button class="btn" type="button" id="upd-ok">Descargar</button>' : '<a class="btn" href="#ajustes" id="upd-aj">Ver en Ajustes</a>'}</div>
+        <button class="link-btn" type="button" id="upd-never" style="margin:6px auto 0;display:block">No volver a avisarme de versiones</button>`, (m, close) => {
+        $('#upd-no', m).onclick = close;
+        $('#upd-ok', m)?.addEventListener('click', () => { openWeb(r.url); close(); });
+        $('#upd-aj', m)?.addEventListener('click', close);
+        $('#upd-never', m).onclick = () => { settings.avisarVersion = false; saveSettings(); close(); toast('No te avisaré de versiones. Puedes reactivarlo en Ajustes.'); };
+      });
     }
   },
 };
@@ -1716,7 +1725,7 @@ views.cerca = (el) => {
   resumeHandlers.add(alVolver);
   async function locate() {
     if (!(await ubicacionActiva())) { if (!dead) { el.innerHTML = `<div class="stack">${avisoGeoOff()}${emptyHTML(ICON.pin, 'Paradas cerca de ti', 'Cuando enciendas la ubicación verás aquí las paradas más cercanas.', '<div class="btn-row" style="justify-content:center"><a class="btn ghost" href="#mapa">Ver el mapa</a><a class="btn ghost" href="#ruta">Cómo llegar</a></div>')}</div>`; bindGeoOff(); } return; }
-    el.innerHTML = skeletons(3);
+    el.innerHTML = `<div class="stack view-anim">${cargandoHTML('Buscando paradas cerca de ti…', 'Un momento, localizando tu posición.')}</div>`;
     try { pos = await getPosition(); await load(); stop ??= autoRefresh(() => load(true)); } catch (err) {
       el.innerHTML = emptyHTML(ICON.pin, 'No sabemos dónde estás', esc(geoErrorText(err)), '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center"><button class="btn" type="button" id="btn-geo">Reintentar</button><a class="btn ghost" href="#mapa">Ver el mapa</a></div>');
       $('#btn-geo', el).onclick = locate;

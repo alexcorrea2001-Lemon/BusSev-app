@@ -265,6 +265,14 @@ main { position: relative; overflow: hidden; min-height: 0; }
 .scan-box p { margin: 0; color: var(--muted); }
 .pulse { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { transform: scale(1.08); opacity: .7; } }
+/* #5 Animación de escaneo de la tarjeta NFC: ondas que salen del icono mientras espera la tarjeta */
+.nfc-scan { position: relative; display: inline-grid; place-items: center; width: 40px; height: 40px; flex: none; }
+.nfc-scan svg { position: relative; z-index: 1; width: 34px; height: 34px; }
+.nfc-scan i { position: absolute; inset: 2px; border: 2px solid currentColor; border-radius: 50%; opacity: 0; animation: nfc-ripple 1.8s ease-out infinite; }
+.nfc-scan i:nth-child(3) { animation-delay: .6s; }
+.nfc-scan i:nth-child(4) { animation-delay: 1.2s; }
+@keyframes nfc-ripple { 0% { transform: scale(.55); opacity: .55; } 100% { transform: scale(2.2); opacity: 0; } }
+:root.a-quieto .nfc-scan i { display: none; animation: none; }
 @media (prefers-reduced-motion: reduce) { .pulse, .icon-btn.spinning svg { animation: none; } .switch, .switch::after { transition: none; } }
 
 /* ---------- MapLibre ---------- */
