@@ -13,7 +13,8 @@ const store = {
 const DEFAULTS = {
   theme: 'dark', color: 'rojo', refresh: 30, liveLines: true, mapStyle: 'oscuro',
   tematicaAuto: true, tematica: 'normal',
-  voz: false, vozAuto: false, letraGrande: false, altoContraste: false, menosAnimaciones: false, vibrar: true, botonesGrandes: false,
+  voz: false, vozAuto: false, letraGrande: false, escalaTexto: 1.22, altoContraste: false, menosAnimaciones: false, vibrar: true, botonesGrandes: false,
+  modoSencillo: false, unaMano: false,
   revisarCada: 3, avisosTussam: 'mias', saldoURL: '', tiemposServidor: false, fondo: '', vehiculosFiesta: false, avisarVersion: true,
 };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
@@ -83,6 +84,30 @@ function tematicaPorFecha(d = new Date()) {
   return 'normal';
 }
 const tematicaActiva = () => (settings.tematicaAuto ? tematicaPorFecha() : (TEMATICAS[settings.tematica] ? settings.tematica : 'normal'));
+/* Festivos de Sevilla (nacionales + Andalucía + Jueves y Viernes Santo). En festivo y domingo
+   TUSSAM circula con horario reducido; se avisa en Favoritas. Pueden faltar los 2 locales que
+   fija el Ayuntamiento cada año, que cambian. */
+const FESTIVOS_FIJOS = ['01-01', '01-06', '02-28', '05-01', '08-15', '10-12', '11-01', '12-06', '12-08', '12-25'];
+const claveDia = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function festivosDe(y) {
+  const s = new Set(FESTIVOS_FIJOS.map((m) => `${y}-${m}`));
+  const p = pascua(y), sem = (n) => claveDia(new Date(p.getFullYear(), p.getMonth(), p.getDate() + n));
+  s.add(sem(-3)); s.add(sem(-2)); // Jueves y Viernes Santo
+  return s;
+}
+function tipoDia(d = new Date()) {
+  if (festivosDe(d.getFullYear()).has(claveDia(d))) return 'festivo';
+  const wd = d.getDay();
+  return wd === 0 ? 'domingo' : wd === 6 ? 'sabado' : 'laborable';
+}
+function servicioHoyHTML() {
+  const t = tipoDia();
+  if (t === 'laborable') return '';
+  const txt = t === 'festivo' ? 'Hoy es festivo: TUSSAM circula con horario de domingos y festivos (menos autobuses de lo normal).'
+    : t === 'domingo' ? 'Hoy es domingo: horario reducido, pasan menos autobuses.'
+      : 'Hoy es sábado: horario de sábado, distinto al de diario.';
+  return `<div class="dia-aviso dia-${t}">📅 <span>${txt}</span></div>`;
+}
 /* Vehículos de fiesta (opcional en Ajustes): cada autobús elige uno al azar, siempre el mismo para ese autobús */
 const VEHICULOS_FIESTA = { semanasanta: { n: 8, nombre: 'pasos de Semana Santa', clase: 'veh-paso' }, feria: { n: 8, nombre: 'coches de caballos', clase: 'veh-coche' }, navidad: { n: 11, nombre: 'carrozas', clase: 'veh-carroza' } };
 const vehiculoFiesta = () => (settings.vehiculosFiesta ? VEHICULOS_FIESTA[tematicaActiva()] || null : null);
@@ -116,9 +141,12 @@ function applyTheme() {
   root.style.setProperty('--accent-soft', pal[1]);
   root.style.setProperty('--on-accent', pal[2]);
   root.classList.toggle('a-letra', !!settings.letraGrande);
+  root.style.setProperty('--escala-texto', settings.escalaTexto || 1.22);
   root.classList.toggle('a-contraste', !!settings.altoContraste);
   root.classList.toggle('a-quieto', !!settings.menosAnimaciones || reduceMQ.matches);
   root.classList.toggle('a-botones', !!settings.botonesGrandes);
+  root.classList.toggle('a-sencillo', !!settings.modoSencillo);
+  root.classList.toggle('a-unamano', !!settings.unaMano);
   const v = vehiculoFiesta();
   document.querySelectorAll('img.busmk-img').forEach((i) => {
     i.src = busImg(i.dataset.k);
@@ -1127,6 +1155,7 @@ views.favoritas = (el) => {
     }
     el.__marco = marco;
     el.innerHTML = `<div class="stack view-anim"><div class="page-head row-between"><div><h1>Favoritas</h1><p>Tus paradas con los tiempos en directo.</p></div><a class="btn ghost sm" href="#ruta">${ICON.route}Cómo llegar</a></div>
+      ${servicioHoyHTML()}
       ${avs.length ? `<div class="set-group"><h3>Avisos de llegada</h3>${avs.map((a) => `<div class="row-flat">${badge(a.linea, lineaFor(a.linea)?.color, { sm: true })}<div style="flex:1;min-width:0"><b>${esc(a.parada)}</b><p class="help">Cuando falten ${a.antes} min · sobre las ${new Date(a.at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p></div><button class="back-btn" type="button" data-av-del="${a.id}" aria-label="Quitar aviso">${ICON.close}</button></div>`).join('')}</div>` : ''}
       ${saludoFiestaHTML()}
       <div id="fav-noche">${nocturnasHTML()}</div>
@@ -1823,9 +1852,12 @@ views.ajustes = (el) => {
       <div class="set-group">
         ${sw('voz', settings.voz, 'Leer en voz alta', 'Muestra el botón «Escuchar» en las paradas.')}
         ${settings.voz ? sw('vozAuto', settings.vozAuto, 'Leer al abrir una parada', 'Lee los tiempos nada más abrirla.') : ''}
-        ${sw('letraGrande', settings.letraGrande, 'Letra grande', '')}
-        ${sw('altoContraste', settings.altoContraste, 'Alto contraste', 'Textos y bordes más marcados.')}
+        ${sw('modoSencillo', settings.modoSencillo, 'Modo sencillo', 'Todo más grande y sin adornos: pensado para quien quiere lo justo y claro.')}
+        <div class="switch-row"><div><h3>Tamaño del texto</h3><p>Agranda la letra de toda la app.</p></div></div>
+        ${segBtns('escalaTexto', [[1, 'Normal'], [1.22, 'Grande'], [1.35, 'Más'], [1.5, 'Máximo']], settings.letraGrande ? settings.escalaTexto : 1)}
         ${sw('botonesGrandes', settings.botonesGrandes, 'Botones más grandes', 'Más fáciles de tocar.')}
+        ${sw('unaMano', settings.unaMano, 'Modo una mano', 'Baja el contenido para llegar con el pulgar.')}
+        ${sw('altoContraste', settings.altoContraste, 'Alto contraste', 'Textos y bordes más marcados.')}
         ${sw('menosAnimaciones', settings.menosAnimaciones, 'Reducir animaciones', 'Sin movimientos ni transiciones; también ahorra batería.')}
         ${sw('vibrar', settings.vibrar, 'Vibración', 'Al guardar favoritas y al leer la tarjeta.')}
       </div>
@@ -1867,10 +1899,11 @@ views.ajustes = (el) => {
     </div>`;
     $('.back-btn', el).onclick = goBack;
     el.querySelectorAll('[data-set]').forEach((b) => { b.onclick = () => {
-      const k = b.dataset.set; settings[k] = ['refresh', 'revisarCada'].includes(k) ? Number(b.dataset.v) : b.dataset.v;
+      const k = b.dataset.set; settings[k] = ['refresh', 'revisarCada', 'escalaTexto'].includes(k) ? Number(b.dataset.v) : b.dataset.v;
       if (k === 'theme' && FONDOS[settings.fondo] && (b.dataset.v === 'auto' || FONDOS[settings.fondo].base !== b.dataset.v)) settings.fondo = '';
+      if (k === 'escalaTexto') settings.letraGrande = Number(b.dataset.v) > 1;
       saveSettings();
-      if (k === 'theme' || k === 'mapStyle') applyTheme();
+      if (k === 'theme' || k === 'mapStyle' || k === 'escalaTexto') applyTheme();
       if (k === 'avisosTussam' && b.dataset.v !== 'no' && isNative()) window.avisos?.permisoOk?.();
       render();
     }; });

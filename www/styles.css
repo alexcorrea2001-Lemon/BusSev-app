@@ -635,10 +635,13 @@ html.oculta .fiesta span, html.oculta .topbar::after { animation-play-state: pau
 :root[data-tematica="semanasanta"] .saludo-fiesta { background: linear-gradient(120deg, #3f1d5e, #6a3a92); color: #f6e3a6; }
 :root[data-tematica="feria"] .saludo-fiesta { background: #0f8a3c radial-gradient(circle, rgb(255 255 255 / .25) 4px, transparent 4.5px) 0 0 / 22px 22px; }
 :root[data-tematica="halloween"] .saludo-fiesta { background: linear-gradient(120deg, #24112f, #5a2a00); color: #ffb066; }
+/* Aviso de tipo de día (festivo / domingo / sábado): horario reducido de TUSSAM */
+.dia-aviso { display: flex; gap: 10px; align-items: center; padding: 11px 14px; border-radius: var(--radius); background: var(--surface-2); font-size: 14px; line-height: 1.35; border-left: 4px solid var(--accent); }
+.dia-aviso.dia-sabado { border-left-color: var(--muted); color: var(--muted); }
 
 /* ================= v5.2 Accesibilidad que se nota ================= */
 /* Letra grande: todo el contenido un 22 % más grande (menos el mapa, para que no se descoloque) */
-.a-letra .view:not(.view-map), .a-letra .modal, .a-letra .toast { zoom: 1.22; }
+.a-letra .view:not(.view-map), .a-letra .modal, .a-letra .toast { zoom: var(--escala-texto, 1.22); }
 .a-letra .sheet { font-size: 18px; }
 .a-letra .sheet .arr-dest b { font-size: 19px; }
 .a-letra .search input { font-size: 19px; }
@@ -670,6 +673,19 @@ html.oculta .fiesta span, html.oculta .topbar::after { animation-play-state: pau
 .a-botones .tabbar svg { width: 30px; height: 30px; }
 .a-botones .arr, .a-botones .row, .a-botones .av-row, .a-botones .timeline a { min-height: 64px; }
 .a-botones .switch { transform: scale(1.3); margin-right: 6px; }
+
+/* Modo sencillo (#63): todo más grande y sin adornos, pensado para quien quiere lo justo */
+.a-sencillo:not(.a-letra) .view:not(.view-map), .a-sencillo:not(.a-letra) .modal, .a-sencillo:not(.a-letra) .toast { zoom: 1.18; }
+.a-sencillo .btn { min-height: 58px; font-size: 18px; border-radius: 14px; }
+.a-sencillo .fav-btn, .a-sencillo .icon-btn, .a-sencillo .back-btn { width: 56px; height: 56px; }
+.a-sencillo .arr, .a-sencillo .row, .a-sencillo .av-row { min-height: 60px; }
+.a-sencillo .tabbar a { font-weight: 700; }
+/* Fuera adornos y textos de relleno */
+.a-sencillo .fiesta-img, .a-sencillo .saludo-fiesta, .a-sencillo .page-head p, .a-sencillo .updated, .a-sencillo .live-note { display: none; }
+.a-sencillo .help, .a-sencillo .small.muted { font-size: 15px; }
+
+/* Modo una mano: baja el contenido para alcanzarlo con el pulgar (no afecta al mapa) */
+:root.a-unamano .view:not(.view-map) { padding-top: 26vh !important; }
 /* Los mapas pequeños se quedan a escala 1 dentro de la letra grande (si no, los toques no caen en su sitio) */
 .a-letra .map-box { zoom: 0.8197; height: 390px; }
 .a-contraste .switch { background: #6b6b6b; }
@@ -791,12 +807,12 @@ html.con-mapa-completo .tabbar, html.con-mapa-completo .topbar { visibility: hid
 .busmk.veh-paso.izq .busmk-img { transform: none; }
 .map-linecard { grid-template-columns: minmax(0, 1fr); }
 .map-linecard > * { min-width: 0; }
-/* Mapa grande: el zoom + brújula arriba a la derecha; los botones de acción
-   (ubicación, autobuses, pantalla completa) se agrupan abajo a la derecha, a mano,
-   aprovechando el hueco central y sin chocar con el zoom. */
-#map-all .maplibregl-ctrl-top-right { top: 70px; }
-:root:not([data-tematica="normal"]) #map-all .maplibregl-ctrl-top-right { top: 96px; }
-.map-fabs { position: absolute; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 500; display: flex; flex-direction: column-reverse; align-items: center; gap: 10px; }
+/* Mapa grande: el zoom + brújula abajo a la derecha; los botones de acción
+   (ubicación arriba, y debajo autobuses y pantalla completa) en una columna arriba
+   a la derecha, sin hueco entre ellos y sin chocar con el zoom. */
+#map-all .maplibregl-ctrl-top-right { top: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+.map-fabs { position: absolute; right: calc(14px + env(safe-area-inset-right, 0px)); top: 14px; z-index: 500; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+:root:not([data-tematica="normal"]) .map-fabs { top: 40px; }
 .map-fabs .fab { position: static; top: auto; right: auto; }
 
 /* ================= v6.1 Animación de carga ================= */

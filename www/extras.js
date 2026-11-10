@@ -13,19 +13,35 @@ const avisos = {
   list() { const now = Date.now(); return store.get('avisos', []).filter((a) => a.at > now - 60_000); },
   save(l) { store.set('avisos', l); },
   find(codigo, linea, destino) { return this.list().find((a) => a.codigo === codigo && a.linea === linea && a.destino === destino) || null; },
+  /* Canal de alta importancia: así el aviso salta encima (heads-up), suena y vibra
+     aunque el móvil esté en silencio de notificaciones normales. Es idempotente. */
+  async canal() {
+    if (this._canal || !plugin('LocalNotifications')) return;
+    try {
+      await native('LocalNotifications', 'createChannel', {
+        id: 'bussev_llegada', name: 'Avisos de llegada',
+        description: 'Te avisa cuando tu autobús está a punto de llegar.',
+        importance: 5, visibility: 1, vibration: true, lights: true, lightColor: '#D41C2B',
+      });
+    } catch { /* algunos Android no lo soportan: se usará el canal por defecto */ }
+    this._canal = true;
+  },
   async permiso() {
     if (!plugin('LocalNotifications')) throw new Error('Los avisos solo funcionan en la app instalada.');
     let p = await native('LocalNotifications', 'checkPermissions').catch(() => ({}));
     if (p.display !== 'granted') p = await native('LocalNotifications', 'requestPermissions').catch(() => ({}));
     if (p.display !== 'granted') throw new Error('Activa las notificaciones de BusSev en los ajustes del móvil para recibir avisos.');
+    await this.canal();
   },
   async programar(a) {
     const at = Math.max(Date.now() + 5000, Date.now() + (a.minutos - a.antes) * 60_000);
     const id = a.id || (Math.floor(Math.random() * 2_000_000_000) + 1);
+    await this.canal();
     await native('LocalNotifications', 'cancel', { notifications: [{ id }] }).catch(() => null);
     await native('LocalNotifications', 'schedule', { notifications: [{
       id, title: `Línea ${a.linea}: llega en ${a.antes} min`, body: `${a.parada} · hacia ${a.destino}`,
-      schedule: { at: new Date(at).toISOString(), allowWhileIdle: true }, smallIcon: 'ic_stat_bus', iconColor: '#D41C2B',
+      schedule: { at: new Date(at).toISOString(), allowWhileIdle: true }, channelId: 'bussev_llegada',
+      smallIcon: 'ic_stat_bus', iconColor: '#D41C2B', autoCancel: true,
     }] });
     const l = this.list().filter((x) => x.id !== id);
     l.push({ id, codigo: a.codigo, parada: a.parada, linea: a.linea, destino: a.destino, antes: a.antes, at });
