@@ -1,0 +1,7 @@
+# Credenciales de la API de TUSSAM: NO subir a GitHub.
+# GitHub las escribe al compilar, desde el Secret TUSSAM_SECRETS_JS.
+www/secrets.js
+secrets.js
+
+# Geometría real del GTFS (shapes.txt) para el build: la genera el pipeline, no se sube.
+scripts/_shapes.json

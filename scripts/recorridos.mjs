@@ -5,18 +5,25 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 import crypto from 'node:crypto';
+import { recorridosOSM, mejorEncaje } from './recorridos_osm.mjs';
 
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
 const MAX_WAYPOINTS = 80;
 let MAX_AJUSTE = 10;          // el servidor público de OSRM solo encaja trazados de pocas paradas de una vez
-const VERSION_CALCULO = 4;    // súbelo si cambia la forma de calcular, para que se repita aunque los datos sean iguales
+const VERSION_CALCULO = 6;    // 6: trazado real = shapes.txt del GTFS (si hay) → OpenStreetMap → OSRM
 const PAUSA_MS = Number(process.env.OSRM_PAUSA_MS ?? 1100); // el servidor público pide como mucho 1 consulta por segundo
 
 const ctx = { window: {} };
 vm.runInNewContext(fs.readFileSync(`${ROOT}www/data.js`, 'utf8'), ctx);
 const D = ctx.window.BUSSEV_DATA;
 const paradas = new Map(D.paradas.map((p) => [p.codigo, p]));
+
+/* Geometría REAL del recorrido que publica TUSSAM (shapes.txt del GTFS), si gtfs_a_datos.py la dejó
+   en scripts/_shapes.json. Es la ruta exacta del autobús; si falta una línea, se calcula con OSRM. */
+let shapesGtfs = {};
+try { shapesGtfs = JSON.parse(fs.readFileSync(`${ROOT}scripts/_shapes.json`, 'utf8')) || {}; } catch { /* no hay: se usa OSRM */ }
+if (Object.keys(shapesGtfs).length) console.log(`Geometría real del GTFS para ${Object.keys(shapesGtfs).length} líneas-sentido: se usa en vez de OSRM.`);
 
 /* 0) Si ya se calcularon (y salieron completos) para estos mismos datos, no se repite: compila más rápido
       y no se carga a los servidores públicos de mapas. */
@@ -56,6 +63,14 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) {
     osmReutilizado = osm.size > 0;
   }
   for (const [c, pos] of osm) { const p = paradas.get(c); if (p) { p.latitud = pos[0]; p.longitud = pos[1]; } }
+}
+
+/* Trazado real de OpenStreetMap (relaciones route=bus de TUSSAM). TUSSAM no da geometría en su GTFS,
+   así que OSM es la fuente del recorrido real; las líneas que no estén en OSM se calculan con OSRM. */
+let osmRec = new Map();
+if (!process.env.BUSSEV_SOLO_FUNCIONES && !process.env.SIN_OSM_RECORRIDOS) {
+  try { osmRec = await recorridosOSM(); console.log(`OpenStreetMap: recorridos de ${osmRec.size} refs de línea (relaciones route=bus).`); }
+  catch (e) { console.log(`OpenStreetMap (recorridos) no disponible (${e.message}): se usará OSRM.`); }
 }
 
 const grupos = new Map();
@@ -180,10 +195,41 @@ let rapidas = 0, sinCalcular = 0, fallidas = 0;
 
 const salida = {};
 const ajustes = new Map();   // parada -> { dist, pos } (posición en la calle)
-let ok = 0, rectos = 0;
+let ok = 0, rectos = 0, shapesUsados = 0, osmUsados = 0;
 if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
   const stops = lista.sort((a, b) => a.orden - b.orden);
   if (stops.length < 2) continue;
+  // Geometría REAL del GTFS: si la hay, se usa tal cual (es el recorrido oficial del bus) y no se llama a OSRM.
+  const shp = shapesGtfs[k];
+  if (Array.isArray(shp) && shp.length >= 2) {
+    const pts = shp.map(([la, lo]) => [Math.round(la * 1e5) / 1e5, Math.round(lo * 1e5) / 1e5]);
+    // Índice en la geometría de cada parada: el punto más cercano, avanzando siempre hacia delante
+    const idx = []; let desde = 0;
+    for (const s of stops) {
+      let best = desde, bd = Infinity;
+      for (let j = desde; j < pts.length; j++) { const dd = hav([s.lat, s.lon], pts[j]); if (dd < bd) { bd = dd; best = j; } }
+      idx.push(best); desde = best;
+    }
+    const d = []; let pl = 0, pn = 0;
+    for (const [lat, lon] of pts) { const L = Math.round(lat * 1e5), N = Math.round(lon * 1e5); d.push(L - pl, N - pn); pl = L; pn = N; }
+    salida[k] = { d, s: idx };
+    ok++; shapesUsados++; process.stdout.write(`✓ ${k} (geometría real del GTFS, ${stops.length} paradas)\n`);
+    continue;
+  }
+  // 2) Trazado real de OpenStreetMap (relación route=bus de la línea), si encaja bien con las paradas
+  const refOsm = String(k.split('|')[0]).replace(/^0+/, '');
+  const candOsm = osmRec.get(refOsm);
+  if (candOsm && candOsm.length) {
+    const m = mejorEncaje(candOsm, stops.map((s) => [s.lat, s.lon]));
+    if (m) {
+      const pts = m.pts.map(([la, lo]) => [Math.round(la * 1e5) / 1e5, Math.round(lo * 1e5) / 1e5]);
+      const d = []; let pl = 0, pn = 0;
+      for (const [lat, lon] of pts) { const L = Math.round(lat * 1e5), N = Math.round(lon * 1e5); d.push(L - pl, N - pn); pl = L; pn = N; }
+      salida[k] = { d, s: m.idx };
+      ok++; osmUsados++; process.stdout.write(`✓ ${k} (OpenStreetMap, ${stops.length} paradas, ±${Math.round(m.coste)} m)\n`);
+      continue;
+    }
+  }
   // Con poco tiempo, el resto de líneas se calcula en modo rápido (una consulta por línea): siempre por calle
   const rapido = !quedaTiempo(LIMITE_COMPLETO);
   if (rapido) rapidas++;
@@ -260,8 +306,8 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
 }
 
 if (!process.env.BUSSEV_SOLO_FUNCIONES) fs.writeFileSync(`${ROOT}www/recorridos.js`,
-  `/* Recorridos por calle calculados con OSRM (© OpenStreetMap). ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n` +
+  `/* Recorridos: trazado real de OpenStreetMap (© colaboradores de OSM, ODbL) donde la línea está mapeada; el resto por calle con OSRM. ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n` +
   `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...[...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)]), ...osm]))};\n` +
   `/* Posición de las paradas según OpenStreetMap (© colaboradores de OpenStreetMap, ODbL); se reutiliza si un día no contesta */\nwindow.BUSSEV_PARADAS_OSM=${JSON.stringify(Object.fromEntries(osm))};\n` +
   `window.BUSSEV_RECORRIDOS_FIRMA="${FIRMA}";window.BUSSEV_RECORRIDOS_COMPLETO=${!rapidas && !sinCalcular && !fallidas && osm.size > 0 && !osmReutilizado};\n`);
-if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido, ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle; ${rapidas} líneas en modo rápido, ${sinCalcular} sin calcular.`);
+if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido (${shapesUsados} del GTFS, ${osmUsados} de OpenStreetMap, el resto por OSRM), ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle; ${rapidas} líneas en modo rápido, ${sinCalcular} sin calcular.`);
