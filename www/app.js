@@ -522,7 +522,12 @@ function boardHTML(tiempos, status, { limit = 99, filtrado = false, codigo = nul
 function freshnessPill(d) {
   if (d?.stale) {
     const when = d.cached_at ? new Date(d.cached_at) : null;
-    return `<span class="pill stale">Últimos datos${when && !Number.isNaN(+when) ? ' de las ' + when.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : ''}</span>`;
+    const ok = when && !Number.isNaN(+when);
+    const hoy = ok && when.toDateString() === new Date().toDateString();
+    const hora = ok ? when.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
+    const cuando = ok ? (hoy ? 'de las ' + hora : 'del ' + when.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) + ', ' + hora) : '';
+    const prefijo = navigator.onLine === false ? 'Sin conexión' : 'Últimos datos';
+    return `<span class="pill stale">${prefijo}${cuando ? ' · ' + cuando : ''}</span>`;
   }
   return '<span class="pill live">En directo</span>';
 }
@@ -683,8 +688,8 @@ document.addEventListener('click', (e) => {
 let appVisible = document.visibilityState !== 'hidden';
 const resumeHandlers = new Set();
 // Al recuperar la conexión, se actualiza lo que estés viendo sin tocar nada
-window.addEventListener('online', () => { if (appVisible) { toast('Conexión recuperada'); setTimeout(() => active?.refresh?.(), 400); } });
-window.addEventListener('offline', () => toast('Sin conexión: se muestran los últimos datos'));
+window.addEventListener('online', () => { if (appVisible) { toast('Conexión recuperada'); active?.rerender?.(); setTimeout(() => active?.refresh?.(), 400); } });
+window.addEventListener('offline', () => { toast('Sin conexión: se muestran los últimos horarios guardados'); active?.rerender?.(); });
 function setVisible(v) { const was = appVisible; appVisible = v; document.documentElement.classList.toggle('oculta', !v); if (v && !was) { repintar(); for (const fn of resumeHandlers) fn(); } }
 /* Al volver de otra app, a veces Android no vuelve a pintar la pantalla (se queda gris hasta tocar algo).
    Se fuerza un repintado, se recolocan los mapas (y se rehacen si el móvil les quitó la gráfica)
@@ -1173,11 +1178,17 @@ function nocturnasHTML() {
   return `<div class="set-group"><h3>🌙 Autobuses nocturnos</h3><div class="list">${rows}</div><p class="small muted" style="margin:.4rem 0 0">Las líneas Búho circulan de madrugada. Toca una para ver su recorrido y los tiempos.</p></div>`;
 }
 
+/* Sin conexión: aviso en Favoritas de que los horarios son los últimos guardados */
+function offlineHTML() {
+  if (navigator.onLine !== false) return '';
+  return `<div class="dia-aviso dia-offline">📴 <span>Sin conexión. Se muestran los últimos horarios guardados en el móvil; pueden no estar al día.</span></div>`;
+}
+
 /* ---------- Favoritas ---------- */
 views.favoritas = (el) => {
   let stop = null, loading = false, results = null, dead = false;
   // Últimos tiempos guardados (< 10 min) para enseñarlos al instante al abrir, en vez de «Cargando…»
-  const recientes = (codigo) => { const u = window.BusSevBackend?.ultimo?.(codigo); return u && u.cached_at && Date.now() - Date.parse(u.cached_at) < 600000 ? u : null; };
+  const recientes = (codigo) => { const u = window.BusSevBackend?.ultimo?.(codigo); if (!u || !u.cached_at) return null; return (navigator.onLine === false || Date.now() - Date.parse(u.cached_at) < 600000) ? u : null; };
   function paint() {
     const list = favs.list();
     if (!list.length) {
@@ -1200,11 +1211,13 @@ views.favoritas = (el) => {
       setHTML($('#fav-cards', el), cards);
       const nb = $('#fav-noche', el); if (nb) setHTML(nb, nocturnasHTML());
       const sb = $('#fav-saldo', el); if (sb) setHTML(sb, tarjetasBajasHTML());
+      const ob = $('#fav-offline', el); if (ob) setHTML(ob, offlineHTML());
       $('#fav-upd', el).textContent = results ? `Actualizado a las ${fmtClock()} · ${refreshNote()}` : '';
       return true;
     }
     el.__marco = marco;
     el.innerHTML = `<div class="stack view-anim"><div class="page-head row-between"><div><h1>Favoritas</h1><p>Tus paradas con los tiempos en directo.</p></div><a class="btn ghost sm" href="#ruta">${ICON.route}Cómo llegar</a></div>
+      <div id="fav-offline">${offlineHTML()}</div>
       ${servicioHoyHTML()}
       ${avs.length ? `<div class="set-group"><h3>Avisos de llegada</h3>${avs.map((a) => `<div class="row-flat"><a class="av-ll-link" href="#parada-${esc(a.codigo)}">${badge(a.linea, lineaFor(a.linea)?.color, { sm: true })}<div style="flex:1;min-width:0"><b>${esc(a.parada)}</b><p class="help">Cuando falten ${a.antes} min · sobre las ${new Date(a.at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p></div></a><button class="back-btn" type="button" data-av-del="${a.id}" aria-label="Quitar aviso">${ICON.close}</button></div>`).join('')}</div>` : ''}
       ${saludoFiestaHTML()}

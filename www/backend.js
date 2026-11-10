@@ -387,7 +387,10 @@
       return data;
     }).catch((e) => {
       const v = c || leerUltimo(codigo);
-      if (v && Date.now() - v.at < STALE_MS) return { ...v.data, stale: true, cached_at: new Date(v.at).toISOString() };
+      // Sin conexión: se enseña lo último guardado aunque sea viejo (horarios sin conexión).
+      // Con conexión pero TUSSAM caído: solo hasta STALE_MS, para no dar por buenos datos rancios.
+      const sinRed = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (v && (sinRed || Date.now() - v.at < STALE_MS)) return { ...v.data, stale: true, cached_at: new Date(v.at).toISOString() };
       throw e;
     }).finally(() => enVuelo.delete(codigo));
     enVuelo.set(codigo, p);
