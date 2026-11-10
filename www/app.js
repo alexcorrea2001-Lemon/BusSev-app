@@ -354,6 +354,7 @@ function actualizarWidget() {
     const favoritas = (favs.list() || []).map((f) => ({
       codigo: String(f.codigo),
       nombre: f.alias || cache.paradaByCode.get(String(f.codigo))?.nombre || ('Parada ' + f.codigo),
+      lineas: Array.isArray(f.lineas) ? f.lineas.map(String) : [],
     }));
     window.Capacitor.nativePromise('BusSevWidget', 'setConfig', {
       clientId: creds.clientId || '', clientSecret: creds.clientSecret || '',
@@ -732,6 +733,8 @@ function repintar() {
   }
 }
 window.busSevVuelve = () => { if (!appVisible) setVisible(true); else repintar(); };
+/* El widget (al tocarlo) abre directamente la parada elegida */
+window.busSevAbrirParada = (c) => { c = String(c == null ? '' : c).replace(/[^0-9]/g, ''); if (c) location.hash = '#parada-' + c; };
 document.addEventListener('visibilitychange', () => setVisible(document.visibilityState === 'visible'));
 document.addEventListener('pause', () => setVisible(false));
 document.addEventListener('resume', () => setVisible(true));

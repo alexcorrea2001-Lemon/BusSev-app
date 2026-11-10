@@ -16,7 +16,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 
@@ -62,7 +64,7 @@ public class BusSevWidgetProvider extends AppWidgetProvider {
         for (int id : ids) actualizar(context, mgr, id);
     }
 
-    /** Parada elegida para un widget: [codigo, nombre], o null si no hay. */
+    /** Parada elegida para un widget: [codigo, nombre, lineasJson], o null si no hay. */
     static String[] leerStop(SharedPreferences p, int id) {
         String one = p.getString("stop_" + id, null);
         if (one == null) {
@@ -77,8 +79,30 @@ public class BusSevWidgetProvider extends AppWidgetProvider {
             JSONObject o = new JSONObject(one);
             String c = o.optString("codigo", "");
             if (c.isEmpty()) return null;
-            return new String[]{ c, o.optString("nombre", "Parada " + c) };
+            JSONArray la = o.optJSONArray("lineas");
+            return new String[]{ c, o.optString("nombre", "Parada " + c), la != null ? la.toString() : "[]" };
         } catch (Exception e) { return null; }
+    }
+
+    /** Solo las líneas que el usuario eligió en esa parada (si tiene filtro); si no, todas. */
+    static List<TussamTiempos.Llegada> filtrar(List<TussamTiempos.Llegada> list, String lineasJson) {
+        if (list == null) return null;
+        try {
+            JSONArray a = new JSONArray(lineasJson);
+            if (a.length() == 0) return list;
+            HashSet<String> set = new HashSet<>();
+            for (int i = 0; i < a.length(); i++) set.add(norm(a.optString(i, "")));
+            List<TussamTiempos.Llegada> out = new ArrayList<>();
+            for (TussamTiempos.Llegada x : list) if (set.contains(norm(x.linea))) out.add(x);
+            return out;
+        } catch (Exception e) { return list; }
+    }
+
+    static String norm(String s) {
+        if (s == null) return "";
+        s = s.trim().toUpperCase(Locale.ROOT);
+        s = s.replaceFirst("^0+(?=.)", "");
+        return s;
     }
 
     static void actualizar(final Context context, final AppWidgetManager mgr, final int widgetId) {
@@ -87,6 +111,7 @@ public class BusSevWidgetProvider extends AppWidgetProvider {
 
         Intent open = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         if (open == null) open = new Intent(context, MainActivity.class);
+        if (stop != null) open.putExtra("bussev_parada", stop[0]);   // al tocar, abre esa parada
         final PendingIntent piOpen = PendingIntent.getActivity(context, widgetId, open, piFlags());
         Intent ref = new Intent(context, BusSevWidgetProvider.class)
                 .setAction(ACTION_REFRESH)
@@ -114,7 +139,7 @@ public class BusSevWidgetProvider extends AppWidgetProvider {
                 try {
                     String tok = TussamTiempos.token(p);
                     if (tok == null) throw new Exception("sin token");
-                    List<TussamTiempos.Llegada> list = TussamTiempos.tiempos(stop[0], tok);
+                    List<TussamTiempos.Llegada> list = filtrar(TussamTiempos.tiempos(stop[0], tok), stop[2]);
                     if (list == null || list.isEmpty()) {
                         for (int r = 0; r < 3; r++) v.setViewVisibility(ROW_BOX[r], View.GONE);
                         v.setTextViewText(R.id.w_updated, "Sin autobuses ahora mismo");

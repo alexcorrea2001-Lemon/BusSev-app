@@ -79,7 +79,9 @@ public class BusSevWidgetConfig extends Activity {
             if (f == null) continue;
             final String codigo = f.optString("codigo", "");
             final String nombre = f.optString("nombre", "Parada " + codigo);
-            list.addView(fila(nombre, codigo));
+            JSONArray la = f.optJSONArray("lineas");
+            final String lineas = la != null ? la.toString() : "[]";
+            list.addView(fila(nombre, codigo, lineas));
         }
         sc.addView(list);
         root.addView(sc);
@@ -88,7 +90,7 @@ public class BusSevWidgetConfig extends Activity {
     }
 
     /** Tarjeta de parada: nombre arriba (grande) y "Parada nº X" debajo (gris). Tocar = elegir. */
-    LinearLayout fila(final String nombre, final String codigo) {
+    LinearLayout fila(final String nombre, final String codigo, final String lineas) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(16), dp(13), dp(16), dp(13));
@@ -116,17 +118,18 @@ public class BusSevWidgetConfig extends Activity {
         box.addView(num);
 
         box.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { elegir(codigo, nombre); }
+            public void onClick(View v) { elegir(codigo, nombre, lineas); }
         });
         return box;
     }
 
-    void elegir(String codigo, String nombre) {
+    void elegir(String codigo, String nombre, String lineas) {
         SharedPreferences p = getSharedPreferences(BusSevWidgetProvider.PREFS, Context.MODE_PRIVATE);
         try {
             JSONObject s = new JSONObject();
             s.put("codigo", codigo);
             s.put("nombre", nombre);
+            try { s.put("lineas", new JSONArray(lineas)); } catch (Exception ig) { /* */ }
             p.edit().putString("stop_" + widgetId, s.toString()).remove("stops_" + widgetId).apply();
         } catch (Exception e) { /* */ }
         BusSevWidgetProvider.actualizar(this, AppWidgetManager.getInstance(this), widgetId);
