@@ -438,5 +438,9 @@
     throw new HttpError(404);
   }
 
-  window.BusSevBackend = { get, estadoTarjeta, HttpError, cancelarFondo, get pausa() { return Math.max(0, pausaHasta - Date.now()); }, get viaServidor() { return usarServidor(); }, generado: D.generado, caduca: D.caduca, caducados };
+  // Últimos tiempos buenos guardados en el móvil (para enseñarlos al instante al abrir la app)
+  const ultimo = (codigo) => { const v = leerUltimo(codigo); return v ? { ...v.data, stale: true, cached_at: new Date(v.at).toISOString() } : null; };
+  // Pide el token OAuth por adelantado al arrancar, para que la primera consulta no espere a autenticarse
+  const precalentar = () => { try { pedirToken().catch(() => {}); } catch { /* da igual */ } };
+  window.BusSevBackend = { get, estadoTarjeta, ultimo, precalentar, HttpError, cancelarFondo, get pausa() { return Math.max(0, pausaHasta - Date.now()); }, get viaServidor() { return usarServidor(); }, generado: D.generado, caduca: D.caduca, caducados };
 })();

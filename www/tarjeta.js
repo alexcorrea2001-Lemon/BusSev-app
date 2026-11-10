@@ -401,8 +401,8 @@ views.tarjeta = (el) => {
           <div class="chips-wrap">${[2, 3, 5, 10].map((v) => `<button class="chip" type="button" data-imp="${v}" aria-pressed="${Number(s.importe) === v}">${v} €</button>`).join('')}
           <input id="av-s-imp" class="mini-input" inputmode="decimal" aria-label="Otra cantidad" placeholder="Otra" value="${[2, 3, 5, 10].includes(Number(s.importe)) ? '' : String(s.importe || '').replace('.', ',')}"></div></div>
       </div>` : '';
-    // Caducidad: solo si la tarjeta caduca
-    const grupoCad = sinCad ? '' : `
+    // Caducidad: solo si la tarjeta caduca de verdad (hay una fecha). Sin fecha (o «no caduca») no se muestra el aviso.
+    const grupoCad = (sinCad || !u?.caducaEl) ? '' : `
       <div class="set-group">
         <div class="switch-row"><div><h3>Caducidad</h3><p>${u?.caducaEl ? `Caduca el ${new Date(u.caducaEl).toLocaleDateString('es-ES')}. Te aviso con antelación.` : 'Te aviso unos días antes de que caduque (cuando TUSSAM dé la fecha).'}</p></div>
           <input class="switch" type="checkbox" id="av-c" ${k.on ? 'checked' : ''} aria-label="Recordatorio de caducidad"></div>

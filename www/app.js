@@ -1061,7 +1061,9 @@ const spin = (on) => $('#btn-refresh').classList.toggle('spinning', !!on);
 
 /* ---------- Favoritas ---------- */
 views.favoritas = (el) => {
-  let stop = null, loading = false, results = null;
+  let stop = null, loading = false, results = null, dead = false;
+  // Últimos tiempos guardados (< 10 min) para enseñarlos al instante al abrir, en vez de «Cargando…»
+  const recientes = (codigo) => { const u = window.BusSevBackend?.ultimo?.(codigo); return u && u.cached_at && Date.now() - Date.parse(u.cached_at) < 600000 ? u : null; };
   function paint() {
     const list = favs.list();
     if (!list.length) {
@@ -1072,9 +1074,12 @@ views.favoritas = (el) => {
     const cards = list.map((f) => {
         const p = cache.paradaByCode.get(f.codigo) || { codigo: f.codigo, nombre: f.nombre };
         const r = results?.get(f.codigo);
-        if (!r) return stopCardHTML(p, { fav: f });
-        if (r.status === 'rejected') return stopCardHTML(p, { tiempos: [], status: 'error', fav: f });
-        return stopCardHTML(p, { tiempos: r.value.tiempos || [], status: r.value.upstream_status || 'ok', limit: 5, fav: f });
+        if (r && r.status === 'fulfilled') return stopCardHTML(p, { tiempos: r.value.tiempos || [], status: r.value.upstream_status || 'ok', limit: 5, fav: f });
+        // Sin respuesta fresca todavía (o falló): si hay tiempos guardados recientes, se enseñan ya
+        const u = recientes(f.codigo);
+        if (u) return stopCardHTML(p, { tiempos: u.tiempos || [], status: 'ok', limit: 5, fav: f });
+        if (r && r.status === 'rejected') return stopCardHTML(p, { tiempos: [], status: 'error', fav: f });
+        return stopCardHTML(p, { fav: f });
       }).join('');
     const marco = `${list.map((f) => f.codigo).join(',')}|${avs.map((a) => a.id + ':' + a.at).join(',')}`;
     if (el.__marco === marco && $('#fav-cards', el)) {
@@ -1099,14 +1104,23 @@ views.favoritas = (el) => {
     const list = favs.list();
     if (!list.length || loading) return;
     loading = true; spin(true);
+    if (!results) results = new Map();
     try {
-      await getLineas().catch(() => null);
-      const rs = await Promise.allSettled(list.map((f) => api(`/paradas/${encodeURIComponent(f.codigo)}/tiempos`)));
-      results = new Map(list.map((f, i) => [f.codigo, rs[i]]));
-      list.forEach((f, i) => { if (rs[i].status === 'fulfilled') { ultimosTiempos.set(f.codigo, rs[i].value.tiempos || []); window.avisos?.actualizar(f.codigo, rs[i].value.tiempos); } });
-      paint();
-      const failed = rs.filter((r) => r.status === 'rejected');
-      if (failed.length === rs.length) $('#fav-upd', el).textContent = failed[0].reason.message;
+      getLineas().catch(() => null);   // en paralelo: no bloquea los tiempos
+      // Cada parada se pinta en cuanto responde, sin esperar a las demás (antes se esperaba a todas)
+      await Promise.all(list.map(async (f) => {
+        try {
+          const v = await api(`/paradas/${encodeURIComponent(f.codigo)}/tiempos`);
+          results.set(f.codigo, { status: 'fulfilled', value: v });
+          ultimosTiempos.set(f.codigo, v.tiempos || []); window.avisos?.actualizar(f.codigo, v.tiempos);
+        } catch (e) {
+          results.set(f.codigo, { status: 'rejected', reason: e });
+        }
+        if (!dead) paint();
+      }));
+      const vals = [...results.values()];
+      const failed = vals.filter((r) => r.status === 'rejected');
+      if (failed.length === vals.length && failed.length) { const u = $('#fav-upd', el); if (u) u.textContent = failed[0].reason.message; }
     } finally { loading = false; spin(false); }
   }
   function pintarAvisos() {
@@ -1116,7 +1130,7 @@ views.favoritas = (el) => {
   getParadas().then(() => { if (paint()) load(); }).catch(() => { if (paint()) load(); });
   stop = autoRefresh(load);
   active.rerender = () => { el.__marco = null; if (paint()) load(); };
-  return { cleanup: () => { stop?.(); window.removeEventListener('bussev-avisos', pintarAvisos); }, refresh: load };
+  return { cleanup: () => { dead = true; stop?.(); window.removeEventListener('bussev-avisos', pintarAvisos); }, refresh: load };
 };
 
 /* ---------- Mapa: paradas, línea elegida y hoja inferior ---------- */
@@ -1979,6 +1993,7 @@ document.querySelectorAll('.tabbar a').forEach((a) => {
   a.addEventListener('click', (e) => { if (location.hash === `#${a.dataset.tab}`) { e.preventDefault(); clearSearch(); route(); } });
 });
 window.addEventListener('hashchange', route);
+window.BusSevBackend?.precalentar?.();   // calienta el token OAuth nada más arrancar, para abrir más rápido
 /* El móvil le quitó la gráfica a un mapa y no se la ha devuelto: se vuelve a crear la pantalla */
 window.addEventListener('bussev-mapa-perdido', (e) => {
   const bm = e.detail;
