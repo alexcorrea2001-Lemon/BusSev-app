@@ -244,12 +244,17 @@ window.avisosTussam = (() => {
   }
   /* Banner en una línea o parada: avisos que afectan a esas líneas */
   function bannerHTML(lineas) {
-    const d = st.datos;
-    if (!d) return '';
-    const set = new Set(lineas.map((n) => lineaFor(n)?.numero || String(n)));
-    const ls = d.lista.filter((a) => a.lineas.some((n) => set.has(n)));
+    const ls = avisosDeLinea(lineas);
     if (!ls.length) return '';
     return `<div class="av-banner"><h3>⚠️ ${ls.length === 1 ? 'Aviso de TUSSAM' : `${ls.length} avisos de TUSSAM`}</h3>${ls.map((a) => filaHTML(a, false)).join('')}</div>`;
+  }
+  /* Avisos (desvíos, obras, cambios) que afectan a una línea o lista de líneas. Para pintar en el mapa. */
+  function avisosDeLinea(lineas) {
+    const d = st.datos;
+    if (!d) return [];
+    const arr = Array.isArray(lineas) ? lineas : [lineas];
+    const set = new Set(arr.map((n) => lineaFor(n)?.numero || String(n)));
+    return d.lista.filter((a) => a.lineas.some((n) => set.has(n)));
   }
   /* Tarjeta en Favoritas */
   async function favoritasHTML() {
@@ -270,7 +275,7 @@ window.avisosTussam = (() => {
     abrir(b.dataset.aviso);
   });
 
-  return { revisar, abrir, bannerHTML, favoritasHTML, filaHTML, misLineas, meAfecta, titulo, lineasDe, leerLista, leerDetalle, get datos() { return st.datos; }, get vistos() { return st.vistos; }, marcarVistos(ids) { const v = st.vistos; ids.forEach((i) => v.add(i)); st.vistos = v; } };
+  return { revisar, abrir, bannerHTML, avisosDeLinea, favoritasHTML, filaHTML, misLineas, meAfecta, titulo, lineasDe, leerLista, leerDetalle, get datos() { return st.datos; }, get vistos() { return st.vistos; }, marcarVistos(ids) { const v = st.vistos; ids.forEach((i) => v.add(i)); st.vistos = v; } };
 })();
 
 /* ---------- Pantalla «Avisos de TUSSAM» ---------- */
