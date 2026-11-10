@@ -14,7 +14,7 @@ const DEFAULTS = {
   theme: 'dark', color: 'rojo', refresh: 30, liveLines: true, mapStyle: 'oscuro',
   tematicaAuto: true, tematica: 'normal',
   voz: false, vozAuto: false, letraGrande: false, escalaTexto: 1.22, altoContraste: false, menosAnimaciones: false, vibrar: true, botonesGrandes: false,
-  modoSencillo: false, unaMano: false,
+  modoSencillo: false,
   revisarCada: 3, avisosTussam: 'mias', saldoURL: '', tiemposServidor: false, fondo: '', vehiculosFiesta: false, avisarVersion: true,
 };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
@@ -108,6 +108,18 @@ function servicioHoyHTML() {
       : 'Hoy es sábado: horario de sábado, distinto al de diario.';
   return `<div class="dia-aviso dia-${t}">📅 <span>${txt}</span></div>`;
 }
+/* Tarjetas con saldo bajo: se enseñan también en Favoritas (debajo de los avisos), no solo como notificación. */
+function tarjetasBajasHTML() {
+  try {
+    if (typeof tarjeta === 'undefined' || !tarjeta.list) return '';
+    const bajas = tarjeta.list().filter((c) => c.avisoSaldo?.on && c.ultimo && c.ultimo.saldo != null && c.ultimo.saldo < Number(c.avisoSaldo.importe));
+    if (!bajas.length) return '';
+    return `<div class="set-group"><h3>💳 Saldo bajo</h3>${bajas.map((c) => {
+      const nombre = esc(c.name || `Tarjeta ${tarjeta.fmt(c.num)}`);
+      return `<a class="row-flat sb-row" href="#tarjeta"><span class="sb-punto" style="background:${safeColor(c.color, 'var(--warn)')}"></span><div style="flex:1;min-width:0"><b>${nombre}</b><p class="help">Le quedan ${fmtEuro(c.ultimo.saldo)} · recárgala pronto</p></div>${ICON.chev}</a>`;
+    }).join('')}</div>`;
+  } catch { return ''; }
+}
 /* Vehículos de fiesta (opcional en Ajustes): cada autobús elige uno al azar, siempre el mismo para ese autobús */
 const VEHICULOS_FIESTA = { semanasanta: { n: 8, nombre: 'pasos de Semana Santa', clase: 'veh-paso' }, feria: { n: 8, nombre: 'coches de caballos', clase: 'veh-coche' }, navidad: { n: 11, nombre: 'carrozas', clase: 'veh-carroza' } };
 const vehiculoFiesta = () => (settings.vehiculosFiesta ? VEHICULOS_FIESTA[tematicaActiva()] || null : null);
@@ -146,7 +158,6 @@ function applyTheme() {
   root.classList.toggle('a-quieto', !!settings.menosAnimaciones || reduceMQ.matches);
   root.classList.toggle('a-botones', !!settings.botonesGrandes);
   root.classList.toggle('a-sencillo', !!settings.modoSencillo);
-  root.classList.toggle('a-unamano', !!settings.unaMano);
   const v = vehiculoFiesta();
   document.querySelectorAll('img.busmk-img').forEach((i) => {
     i.src = busImg(i.dataset.k);
@@ -191,8 +202,11 @@ function fiesta(tem) {
   (document.querySelector('main') || document.body).prepend(capa);
 }
 function saludoFiestaHTML() {
-  const f = FIESTA[tematicaActiva()];
-  return f ? `<div class="saludo-fiesta"><b>${f.saludo}</b><span>${f.sub}</span></div>` : '';
+  const tem = tematicaActiva();
+  const f = FIESTA[tem];
+  if (!f) return '';
+  const especial = tem === 'feria' || tem === 'semanasanta';
+  return `<div class="saludo-fiesta"><b>${f.saludo}</b><span>${f.sub}</span>${especial ? `<a class="sf-btn" href="#avisos">🚌 Ver servicios especiales de ${tem === 'feria' ? 'Feria' : 'Semana Santa'}</a>` : ''}</div>`;
 }
 darkMQ.addEventListener?.('change', () => { if (settings.theme === 'auto') applyTheme(); });
 const animMs = (ms) => (settings.menosAnimaciones || reduceMQ.matches ? 0 : ms);
@@ -1150,6 +1164,7 @@ views.favoritas = (el) => {
     if (el.__marco === marco && $('#fav-cards', el)) {
       setHTML($('#fav-cards', el), cards);
       const nb = $('#fav-noche', el); if (nb) setHTML(nb, nocturnasHTML());
+      const sb = $('#fav-saldo', el); if (sb) setHTML(sb, tarjetasBajasHTML());
       $('#fav-upd', el).textContent = results ? `Actualizado a las ${fmtClock()} · ${refreshNote()}` : '';
       return true;
     }
@@ -1160,6 +1175,7 @@ views.favoritas = (el) => {
       ${saludoFiestaHTML()}
       <div id="fav-noche">${nocturnasHTML()}</div>
       <div id="fav-avisos"></div>
+      <div id="fav-saldo">${tarjetasBajasHTML()}</div>
       <div class="stack" id="fav-cards">${cards}</div>
       <p class="updated" id="fav-upd">${results ? `Actualizado a las ${fmtClock()} · ${refreshNote()}` : ''}</p>
       <p class="small muted" style="text-align:center;margin:0">Toca un autobús para que te avise cuando esté llegando.</p></div>`;
@@ -1519,7 +1535,7 @@ views.lineas = (el) => {
 
 /* ---------- Detalle de línea ---------- */
 views.linea = (el, numero) => {
-  let bm = null, dead = false, ctl = null, sentido = 1;
+  let bm = null, dead = false, ctl = null, sentido = 1, avisoListener = null;
   el.innerHTML = backHead(`<div class="grow"><h2>Línea ${esc(numero)}</h2></div>`) + skeletons(2);
   $('.back-btn', el).onclick = goBack;
   async function init() {
@@ -1537,10 +1553,10 @@ views.linea = (el, numero) => {
       const segLabel = (s) => (sameEnd ? (s === 1 ? 'Ida' : 'Vuelta') : `Hacia ${lastName(s)}`);
       el.innerHTML = `<div class="stack">
         ${backHead(`<div class="grow" style="display:flex;gap:12px;align-items:flex-start"><div style="margin-top:6px">${badge(l.numero, lc)}</div><div style="min-width:0"><h2 style="margin-top:4px">${esc(l.nombre)}</h2><p id="l-horario"></p></div></div>`)}
-        ${window.avisosTussam?.bannerHTML([l.numero]) || ''}
+        <div id="l-av-banner">${window.avisosTussam?.bannerHTML([l.numero]) || ''}</div>
         ${sentidos.length > 1 ? `<div class="seg" role="group" aria-label="Sentido">${sentidos.map((s) => `<button type="button" data-s="${s}" aria-pressed="${s === sentido}">${esc(segLabel(s))}</button>`).join('')}</div>` : ''}
         <div><div class="map-wrap"><div class="map-box" id="l-map"></div>
-          <button class="map-buses-btn" type="button" id="l-buses" aria-pressed="${settings.liveLines}" aria-label="${settings.liveLines ? 'Ocultar los autobuses en directo' : 'Ver los autobuses en directo'}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4 11h16M8 21v-3M16 21v-3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="8" cy="14.5" r="1.1" fill="currentColor"/><circle cx="16" cy="14.5" r="1.1" fill="currentColor"/><path class="tachon" d="M3 3l18 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button></div><p class="live-note" id="l-live"></p></div>
+          <button class="map-buses-btn" type="button" id="l-buses" aria-pressed="${settings.liveLines}" aria-label="${settings.liveLines ? 'Ocultar los autobuses en directo' : 'Ver los autobuses en directo'}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4 11h16M8 21v-3M16 21v-3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="8" cy="14.5" r="1.1" fill="currentColor"/><circle cx="16" cy="14.5" r="1.1" fill="currentColor"/><path class="tachon" d="M3 3l18 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button><a id="l-desvio" class="map-desvio" href="#avisos" hidden>⚠️ Posible desvío · ver aviso</a></div><p class="live-note" id="l-live"></p></div>
         <a class="btn ghost block" href="#mapa" id="l-open-map">${ICON.route}Ver en el mapa grande</a>
         <p class="live-note" style="margin:0"><img class="lg-busimg" src="${busImg()}" alt="" style="height:16px;vertical-align:-3px"> = parada a la que se acerca un autobús (y los minutos que le faltan) · Nº = número de la parada (el del poste)</p>
         <ol class="timeline" id="l-stops" style="--lc:${lc}"></ol>
@@ -1601,6 +1617,19 @@ views.linea = (el, numero) => {
       el.querySelectorAll('[data-s]').forEach((b) => { b.onclick = () => { sentido = Number(b.dataset.s); draw(); }; });
       active.refresh = () => ctl?.live();
       draw();
+      // #56 Desvíos: si esta línea tiene un aviso de TUSSAM, se marca en el mapa (recorrido discontinuo + pastilla)
+      const pintarDesvio = () => {
+        if (dead) return;
+        const avs = window.avisosTussam?.avisosDeLinea?.(l.numero) || [];
+        const banner = $('#l-av-banner', el); if (banner) setHTML(banner, window.avisosTussam?.bannerHTML([l.numero]) || '');
+        const pill = $('#l-desvio', el);
+        if (pill) { pill.hidden = !avs.length; if (avs.length) pill.onclick = (e) => { e.preventDefault(); window.avisosTussam?.abrir?.(avs[0].id); }; }
+        if (bm && avs.length) bm.ready?.then(() => { if (!dead) { try { bm.m.setPaintProperty('bs-route', 'line-dasharray', [2, 1.5]); } catch { /* el estilo aún no está */ } } });
+      };
+      pintarDesvio();
+      avisoListener = pintarDesvio;
+      window.addEventListener('bussev-avisos', pintarDesvio);
+      window.avisosTussam?.revisar?.().catch(() => null);   // asegura que los avisos estén cargados
     } catch (e) {
       if (dead) return;
       el.innerHTML = backHead() + errorHTML(e, 'retry-l');
@@ -1609,7 +1638,7 @@ views.linea = (el, numero) => {
     }
   }
   init();
-  return { cleanup: () => { dead = true; ctl?.clear(); bm?.remove(); } };
+  return { cleanup: () => { dead = true; if (avisoListener) window.removeEventListener('bussev-avisos', avisoListener); ctl?.clear(); bm?.remove(); } };
 };
 
 /* ---------- Detalle de parada ---------- */
@@ -1846,7 +1875,7 @@ views.ajustes = (el) => {
         ${sw('mapaParadas', settings.mapaParadas !== false, 'Paradas', 'Los puntos de las paradas.')}
         ${sw('mapaRecorridos', settings.mapaRecorridos !== false, 'Recorridos', 'La línea del autobús cuando eliges una.')}
         ${sw('mapaCalles', settings.mapaCalles !== false, 'Nombres de calles', 'Las etiquetas de calles y sitios del mapa.')}
-        <p class="help">Los autobuses en directo se encienden con el botón 🚌 del mapa.</p></div>
+        <p class="help">Los autobuses en directo se encienden con el botón <img class="lg-busimg" src="${busImg()}" alt="autobús" style="height:18px;vertical-align:-4px"> del mapa.</p></div>
 
       <h2 class="section-title">Accesibilidad</h2>
       <div class="set-group">
@@ -1856,7 +1885,6 @@ views.ajustes = (el) => {
         <div class="switch-row"><div><h3>Tamaño del texto</h3><p>Agranda la letra de toda la app.</p></div></div>
         ${segBtns('escalaTexto', [[1, 'Normal'], [1.22, 'Grande'], [1.35, 'Más'], [1.5, 'Máximo']], settings.letraGrande ? settings.escalaTexto : 1)}
         ${sw('botonesGrandes', settings.botonesGrandes, 'Botones más grandes', 'Más fáciles de tocar.')}
-        ${sw('unaMano', settings.unaMano, 'Modo una mano', 'Baja el contenido para llegar con el pulgar.')}
         ${sw('altoContraste', settings.altoContraste, 'Alto contraste', 'Textos y bordes más marcados.')}
         ${sw('menosAnimaciones', settings.menosAnimaciones, 'Reducir animaciones', 'Sin movimientos ni transiciones; también ahorra batería.')}
         ${sw('vibrar', settings.vibrar, 'Vibración', 'Al guardar favoritas y al leer la tarjeta.')}
