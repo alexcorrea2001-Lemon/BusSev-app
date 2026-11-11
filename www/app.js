@@ -384,17 +384,30 @@ function getShape(numero, sentido, stops) {
   if (cache.shapes.has(key)) return cache.shapes.get(key);
   let pts, idx;
   const r = window.BUSSEV_RECORRIDOS?.[key];
-  if (r && Array.isArray(r.d) && Array.isArray(r.s) && r.s.length === stops.length) {
+  const tieneTrazado = r && Array.isArray(r.d) && r.d.length >= 4;
+  if (tieneTrazado) {
+    // Siempre se usa la geometría real por calle si existe.
     pts = []; let la = 0, lo = 0;
     for (let i = 0; i + 1 < r.d.length; i += 2) { la += r.d[i]; lo += r.d[i + 1]; pts.push([la / 1e5, lo / 1e5]); }
-    idx = r.s;
+    if (Array.isArray(r.s) && r.s.length === stops.length) {
+      idx = r.s;   // las paradas cuadran con las guardadas: se usan tal cual
+    } else {
+      // El nº de paradas en vivo no coincide con el guardado: se recoloca cada parada sobre el trazado real
+      // (antes, al no coincidir, se tiraba el trazado y se dibujaban líneas rectas).
+      idx = []; let desde = 0;
+      for (const p of stops) {
+        let best = desde, bd = Infinity;
+        for (let j = desde; j < pts.length; j++) { const dd = haversine([p.latitud, p.longitud], pts[j]); if (dd < bd) { bd = dd; best = j; } }
+        idx.push(best); desde = best;
+      }
+    }
   } else {
     pts = stops.map((p) => [p.latitud, p.longitud]);
     idx = stops.map((_, i) => i);
   }
   const cum = [0];
   for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + haversine(pts[i - 1], pts[i]));
-  const shape = { pts, idx, cum, porCalle: !!r };
+  const shape = { pts, idx, cum, porCalle: tieneTrazado };
   cache.shapes.set(key, shape);
   return shape;
 }
@@ -1968,7 +1981,7 @@ views.ajustes = (el) => {
       <h2 class="section-title">Tiempos y avisos</h2>
       <div class="set-group"><h3>Actualizar los tiempos</h3>${segBtns('refresh', [[30, 'Cada 30 s'], [60, 'Cada minuto'], [0, 'Al pulsar ⟳']], settings.refresh)}
         <p>Cuanto menos a menudo, menos batería y datos. Con la app en segundo plano nunca se actualiza.</p></div>
-      <div class="set-group">${sw('liveLines', settings.liveLines, 'Autobuses en directo en el mapa', 'Muestra dónde va cada autobús (en las líneas y en la zona del mapa que miras). También se activa con el botón ${busIco()} del mapa.')}</div>
+      <div class="set-group">${sw('liveLines', settings.liveLines, 'Autobuses en directo en el mapa', 'Muestra dónde va cada autobús (en las líneas y en la zona del mapa que miras). También se activa con el botón ' + busIco() + ' del mapa.')}</div>
       <div class="set-group"><h3>Revisar al abrir la app</h3>${segBtns('revisarCada', [[0, 'Nunca'], [1, 'Cada hora'], [3, 'Cada 3 h'], [6, 'Cada 6 h']], settings.revisarCada)}
         <p>Comprueba el saldo y la caducidad de tus tarjetas guardadas al abrir la app, como mucho con esta frecuencia, y te avisa si el saldo está bajo.</p></div>
       <div class="set-group"><h3>Avisos de TUSSAM (desvíos, obras, horarios especiales)</h3>${segBtns('avisosTussam', [['mias', 'De mis líneas'], ['todas', 'Todos'], ['no', 'No avisar']], settings.avisosTussam)}
