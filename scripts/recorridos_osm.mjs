@@ -22,7 +22,9 @@ async function overpass(q) {
   let ultimo;
   for (const url of OVERPASS) {
     try {
-      const r = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: q }), headers: { 'User-Agent': 'BusSev (app personal, no comercial)' }, signal: AbortSignal.timeout(90_000) });
+      // El cliente esperaba antes 90 s, menos que el tiempo que Overpass se da a sí mismo (180 s): cortaba
+      // la consulta pesada antes de tiempo. Ahora se espera algo más que eso.
+      const r = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: q }), headers: { 'User-Agent': 'BusSev (app personal, no comercial)' }, signal: AbortSignal.timeout(Number(process.env.OSM_TIMEOUT_MS ?? 200_000)) });
       if (!r.ok) throw new Error(`Overpass ${r.status}`);
       const j = await r.json();
       if (!Array.isArray(j.elements)) throw new Error('respuesta rara');
@@ -57,24 +59,35 @@ export function unir(ways) {
   return out;
 }
 
-/* Descarga las relaciones de autobús de OSM y devuelve  Map: ref(normalizada) -> [ { pts, nombre, from, to, tussam } ] */
+/* Descarga las relaciones de autobús de OSM y devuelve  Map: ref(normalizada) -> [ { pts, nombre, from, to, tussam } ].
+   Primero pide SOLO las de TUSSAM (operator/network): es mucho más ligero y no agota el tiempo. Si saca pocas,
+   recurre a todas las de bus de la zona (como antes). */
 export async function recorridosOSM() {
-  const q = `[out:json][timeout:120];rel["type"="route"]["route"="bus"](${BBOX});out geom;`;
-  const els = await overpass(q);
+  // 1º las de TUSSAM (consulta ligera y fiable); 2º el resto de rutas de bus (completa, más pesada) para
+  // rellenar las que en OSM no están etiquetadas como TUSSAM pero tienen el número correcto. Si la segunda
+  // falla (servidor lento), nos quedamos al menos con las de TUSSAM.
+  const qTussam = `[out:json][timeout:180];(rel["type"="route"]["route"="bus"]["operator"~"tussam",i](${BBOX});rel["type"="route"]["route"="bus"]["network"~"tussam",i](${BBOX}););out geom;`;
+  const qTodas = `[out:json][timeout:180];rel["type"="route"]["route"="bus"](${BBOX});out geom;`;
   const out = new Map();
-  for (const rel of els) {
-    if (rel.type !== 'relation' || !rel.members) continue;
-    const t = rel.tags || {};
-    const ref = String(t.ref || '').trim();
-    if (!ref) continue;
-    const tussam = /tussam/i.test(`${t.operator || ''} ${t.network || ''}`);
-    const ways = rel.members.filter((m) => m.type === 'way' && Array.isArray(m.geometry)).map((m) => m.geometry.map((g) => [g.lat, g.lon]));
-    const pts = unir(ways);
-    if (pts.length < 2) continue;
-    const key = ref.replace(/^0+/, '');
-    if (!out.has(key)) out.set(key, []);
-    out.get(key).push({ pts, nombre: t.name || '', from: t.from || '', to: t.to || '', tussam });
-  }
+  const procesar = (els) => {
+    for (const rel of els) {
+      if (rel.type !== 'relation' || !rel.members) continue;
+      const t = rel.tags || {};
+      const ref = String(t.ref || '').trim();
+      if (!ref) continue;
+      const tussam = /tussam/i.test(`${t.operator || ''} ${t.network || ''}`);
+      const ways = rel.members.filter((m) => m.type === 'way' && Array.isArray(m.geometry)).map((m) => m.geometry.map((g) => [g.lat, g.lon]));
+      const pts = unir(ways);
+      if (pts.length < 2) continue;
+      const key = ref.replace(/^0+/, '');
+      if (!out.has(key)) out.set(key, []);
+      out.get(key).push({ pts, nombre: t.name || '', from: t.from || '', to: t.to || '', tussam });
+    }
+  };
+  try { procesar(await overpass(qTussam)); console.log(`  OpenStreetMap: ${out.size} líneas con etiqueta TUSSAM.`); }
+  catch (e) { console.log(`  OpenStreetMap (solo TUSSAM) no fue posible (${e.message}).`); }
+  try { procesar(await overpass(qTodas)); }
+  catch (e) { console.log(`  OpenStreetMap (todas las rutas de bus) no fue posible (${e.message}): se usa solo lo de TUSSAM.`); }
   return out;
 }
 
@@ -98,7 +111,7 @@ export function encajar(pts, stops) {
 /* Elige, entre los candidatos de una línea, el que mejor encaja con estas paradas y en su sentido.
    Devuelve { pts, idx, coste } o null si ninguno encaja bien. Umbral generoso: el trazado de OSM es el
    REAL, y es mejor usarlo aunque las paradas no caigan clavadas que dibujar un rodeo de coche con OSRM. */
-export function mejorEncaje(candidatos, stops, maxCoste = Number(process.env.OSM_MAX_COSTE ?? 80)) {
+export function mejorEncaje(candidatos, stops, maxCoste = Number(process.env.OSM_MAX_COSTE ?? 110)) {
   let mejor = null;
   for (const c of candidatos) {
     for (const pts of [c.pts, c.pts.slice().reverse()]) {   // se prueba el trazado y su inverso (sentido)
