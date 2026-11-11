@@ -890,7 +890,10 @@ function addRouteLayers(bm) {
   bm.layer({ id: 'bs-route-casing', type: 'line', source: 'bs-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000000', 'line-opacity': 0.35, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 16, 10] } });
   bm.layer({ id: 'bs-route', type: 'line', source: 'bs-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 6.5] } });
   bm.layer({ id: 'bs-route-stops', type: 'circle', source: 'bs-route-stops', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 16, 5.5], 'circle-color': '#ffffff', 'circle-stroke-color': ['get', 'color'], 'circle-stroke-width': 2.2 } });
-  bm.layer({ id: 'bs-paths', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 6], 'line-opacity': 0.95 } });
+  bm.layer({ id: 'bs-paths', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 6], 'line-opacity': 0.95,
+    // Desplazamiento lateral por línea: si varios buses van por la misma calle, sus caminos se ven en
+    // paralelo (pegados) en vez de taparse. El valor lo pone drawApproaching en cada camino.
+    'line-offset': ['interpolate', ['linear'], ['zoom'], 12, ['*', ['coalesce', ['get', 'carril'], 0], 2.2], 16, ['*', ['coalesce', ['get', 'carril'], 0], 5]] } });
 }
 /* Marcadores HTML (autobuses y parada) */
 function busEl(label, color, clave) {
@@ -1148,7 +1151,9 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
     const lc = safeColor(l.color, '#555555');
     const shape = getShape(l.numero, sentido, stops);
     bm.source('bs-route', fc([lineF(shape.pts, { color: lc })]));
-    bm.source('bs-route-stops', fc(stops.map((p) => pointF([p.latitud, p.longitud], { color: lc, codigo: p.codigo }))));
+    // Los puntos de parada se colocan SOBRE la línea (el punto del trazado más cercano a cada parada), no en
+    // la coordenada de la acera, para que se vean pegados al recorrido y no flotando a un lado.
+    bm.source('bs-route-stops', fc(stops.map((p, i) => pointF(shape.pts[shape.idx[i]] || [p.latitud, p.longitud], { color: lc, codigo: p.codigo }))));
     bm.source('bs-paths', fc([]));
     markers.clear();
     bm.fit(shape.pts, { padding: { top: 120, bottom: 40, left: 30, right: 30 } });
@@ -1184,7 +1189,13 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
 }
 /* Dibuja los buses que vienen a una parada y su camino */
 function drawApproaching(bm, markers, buses) {
-  bm.source('bs-paths', fc(buses.filter((b) => b.path?.length > 1).map((b) => lineF(b.path, { color: safeColor(b.color, '#3d8bfd') }))));
+  const conPath = buses.filter((b) => b.path?.length > 1);
+  // A cada LÍNEA se le da un «carril» (…, -1, 0, +1, …) para separar en paralelo los caminos que van por la
+  // misma calle: así no se tapan y se entiende que van al mismo lado. Todos los buses de una misma línea
+  // comparten carril (se dibujan juntos). Si solo hay una línea, carril 0 (sin desplazar).
+  const lineas = [...new Set(conPath.map((b) => String(b.linea ?? b.color)))];
+  const carril = (b) => lineas.length < 2 ? 0 : lineas.indexOf(String(b.linea ?? b.color)) - (lineas.length - 1) / 2;
+  bm.source('bs-paths', fc(conPath.map((b) => lineF(b.path, { color: safeColor(b.color, '#3d8bfd'), carril: carril(b) }))));
   markers.sync(buses);
 }
 
