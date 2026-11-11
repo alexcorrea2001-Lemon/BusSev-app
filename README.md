@@ -25,7 +25,7 @@ Guarda las paradas que más usas y ve de un vistazo cuánto le falta a cada auto
 - Arriba te avisa de lo que importa hoy: **buses nocturnos**, **servicios especiales** (Feria, Semana Santa),
   **festivos**, **saldo bajo** o **tarjeta a punto de caducar**, y si estás **sin conexión**.
 
-![Pantalla de Favoritas](docs/capturas/favoritas.png)
+<p align="center"><img src="docs/capturas/favoritas.png" alt="Pantalla de Favoritas" width="280"></p>
 
 ### 🗺️ Mapa
 - Todas las paradas de Sevilla en el mapa.
@@ -40,7 +40,7 @@ Guarda las paradas que más usas y ve de un vistazo cuánto le falta a cada auto
 > TUSSAM no publica el GPS de sus autobuses: BusSev calcula dónde está cada uno a partir de la distancia
 > que da TUSSAM. Es una posición **aproximada**, pero muy cercana a la real.
 
-![El recorrido de una línea en el mapa](docs/capturas/mapa-linea.png)
+<p align="center"><img src="docs/capturas/mapa-linea.png" alt="El recorrido de una línea en el mapa" width="280"></p>
 
 ### 🚏 Parada
 - Minutos que le faltan a cada línea, con el siguiente autobús.
@@ -49,7 +49,7 @@ Guarda las paradas que más usas y ve de un vistazo cuánto le falta a cada auto
 - Las líneas que paran allí y los avisos de TUSSAM que les afectan.
 - Si TUSSAM lo publica, verás si la parada es **accesible** para silla de ruedas (♿).
 
-![Ficha de una parada](docs/capturas/parada.png)
+<p align="center"><img src="docs/capturas/parada.png" alt="Ficha de una parada" width="280"></p>
 
 ### 🔎 Buscador
 En la barra de arriba, en cualquier pantalla, busca **por número de poste**, **por nombre de la parada o la calle**
@@ -72,7 +72,7 @@ También tiene **Cómo llegar**: te dice qué autobús coger (directo o con un t
 - **Avisos**: te avisa si te queda poco saldo o si la tarjeta va a caducar.
 - **Tarifas y títulos de viaje** actualizados desde la web de TUSSAM.
 
-![Tarjeta TUSSAM leída por NFC](docs/capturas/tarjeta.png)
+<p align="center"><img src="docs/capturas/tarjeta.png" alt="Tarjeta TUSSAM leída por NFC" width="280"></p>
 
 ### ⚠️ Avisos de TUSSAM
 Desvíos, obras y horarios especiales (con sus **PDF e imágenes**). BusSev los revisa al abrirse y te manda una
