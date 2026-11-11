@@ -150,6 +150,8 @@ const busImg = (clave) => {
   if (v) return `/img/fiesta/${tem}-${(clave == null ? 0 : hashTexto(clave) % v.n) + 1}.webp`;
   return `/img/buses/${TEMATICAS[tem].bus}.webp`;
 };
+// Iconito del autobús bueno (el de la leyenda del mapa), para usar en textos en vez del emoji 🚌
+const busIco = () => `<img class="lg-busimg" src="${busImg()}" alt="autobús" style="height:1.05em;vertical-align:-2px">`;
 // Colores para personalizar favoritas y tarjetas
 const TAGS = ['#e5303c', '#f08c00', '#f2c400', '#2fb36d', '#1fa3c9', '#3d6bff', '#8a5cf6', '#e0479e', '#7a7f8a'];
 
@@ -226,7 +228,7 @@ function saludoFiestaHTML() {
   const f = FIESTA[tem];
   if (!f) return '';
   const especial = tem === 'feria' || tem === 'semanasanta';
-  return `<div class="saludo-fiesta"><b>${f.saludo}</b><span>${f.sub}</span>${especial ? `<a class="sf-btn" href="#avisos">🚌 Ver servicios especiales de ${tem === 'feria' ? 'Feria' : 'Semana Santa'}</a>` : ''}</div>`;
+  return `<div class="saludo-fiesta"><b>${f.saludo}</b><span>${f.sub}</span>${especial ? `<a class="sf-btn" href="#avisos">${busIco()} Ver servicios especiales de ${tem === 'feria' ? 'Feria' : 'Semana Santa'}</a>` : ''}</div>`;
 }
 darkMQ.addEventListener?.('change', () => { if (settings.theme === 'auto') applyTheme(); });
 const animMs = (ms) => (settings.menosAnimaciones || reduceMQ.matches ? 0 : ms);
@@ -1138,7 +1140,7 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
     bm.fit(shape.pts, { padding: { top: 120, bottom: 40, left: 30, right: 30 } });
     cur = { l, sentido, stops };
     parar();
-    if (!settings.liveLines) { onStatus?.('Autobuses en directo desactivados (botón 🚌 del mapa o Ajustes).'); return; }
+    if (!settings.liveLines) { onStatus?.('Autobuses en directo desactivados (botón ' + busIco() + ' del mapa o Ajustes).', true); return; }
     live();
     stopLive = autoRefresh(live, { min: REFRESH_LINE_MIN });
   }
@@ -1489,7 +1491,7 @@ function zonaBuses(bm, markers, onStatus) {
     if (!puede()) { if (!mapState.sel && !mapState.linea) ocultar(); return; }
     if (!appVisible) return;
     const c = bm.m.getCenter();
-    if (bm.m.getZoom() < ZOOM_MIN) { seq++; markers.clear(); onStatus('🚌 Acércate un poco para ver los autobuses'); return; }
+    if (bm.m.getZoom() < ZOOM_MIN) { seq++; markers.clear(); onStatus(busIco() + ' Acércate un poco para ver los autobuses', true); return; }
     // Si apenas has movido el mapa y es reciente, no se vuelve a preguntar
     if (!forzar && ultima && Date.now() - ultima.at < 20_000 && haversine([c.lat, c.lng], ultima.c) < 250) return;
     const my = ++seq;
@@ -1515,9 +1517,9 @@ function zonaBuses(bm, markers, onStatus) {
     if (my !== seq || !puede()) return;
     const todos = [...vistos.values()];
     if (ok) markers.sync(todos);
-    onStatus(ok === 0
-      ? (limitado ? '🚌 TUSSAM va saturado: los autobuses saldrán en un momento' : '🚌 No se ha podido consultar a TUSSAM')
-      : `🚌 ${todos.length ? `${todos.length} ${todos.length === 1 ? 'autobús' : 'autobuses'} cerca` : 'Ningún autobús cerca ahora'} · ${fmtClock()}`);
+    onStatus(busIco() + ' ' + (ok === 0
+      ? (limitado ? 'TUSSAM va saturado: los autobuses saldrán en un momento' : 'No se ha podido consultar a TUSSAM')
+      : `${todos.length ? `${todos.length} ${todos.length === 1 ? 'autobús' : 'autobuses'} cerca` : 'Ningún autobús cerca ahora'} · ${fmtClock()}`), true);
   }
   bm.m.on('moveend', () => { clearTimeout(deb); if (puede()) deb = setTimeout(() => cargar(false), 1300); });
   return {
@@ -1554,7 +1556,7 @@ views.mapa = (el) => {
     pintarBotonBuses();
     toast(settings.liveLines ? (mapState.linea ? 'Autobuses en directo activados' : 'Activado · elige una línea para ver sus autobuses') : 'Autobuses en directo desactivados');
     if (settings.liveLines) { if (mapState.linea && !mapState.sel) { mapState.line.stop(); mapState.line.resume(); } }
-    else { mapState.zona?.ocultar(); mapState.line?.stop(); mapState.lineMarkers?.clear(); spin(false); const n = $('#ml-live'); if (n) n.textContent = 'Autobuses en directo desactivados (botón 🚌 del mapa).'; }
+    else { mapState.zona?.ocultar(); mapState.line?.stop(); mapState.lineMarkers?.clear(); spin(false); const n = $('#ml-live'); if (n) n.innerHTML = 'Autobuses en directo desactivados (botón ' + busIco() + ' del mapa).'; }
   };
   $('#btn-mapfull', el).onclick = () => mapaPantallaCompleta(!mapCompleto);
   if (mapState.pending) { const n = mapState.pending; mapState.pending = null; chooseMapLine(n); }
@@ -1569,7 +1571,7 @@ views.mapa = (el) => {
     cleanup: () => { mapState.stopTimer?.(); mapState.stopTimer = null; mapState.line?.stop(); mapState.zona?.parar(); if (mapCompleto) mapaPantallaCompleta(false); },
     refresh: () => {
       if (mapState.sel) return mapState.reload?.();
-      if (!settings.liveLines) { toast('Los autobuses en directo están desactivados (botón 🚌)'); return; }
+      if (!settings.liveLines) { toast('Los autobuses en directo están desactivados'); return; }
       return mapState.linea ? mapState.line?.live() : null;   // buses solo con una línea elegida
     },
   };
@@ -1966,7 +1968,7 @@ views.ajustes = (el) => {
       <h2 class="section-title">Tiempos y avisos</h2>
       <div class="set-group"><h3>Actualizar los tiempos</h3>${segBtns('refresh', [[30, 'Cada 30 s'], [60, 'Cada minuto'], [0, 'Al pulsar ⟳']], settings.refresh)}
         <p>Cuanto menos a menudo, menos batería y datos. Con la app en segundo plano nunca se actualiza.</p></div>
-      <div class="set-group">${sw('liveLines', settings.liveLines, 'Autobuses en directo en el mapa', 'Muestra dónde va cada autobús (en las líneas y en la zona del mapa que miras). También se activa con el botón 🚌 del mapa.')}</div>
+      <div class="set-group">${sw('liveLines', settings.liveLines, 'Autobuses en directo en el mapa', 'Muestra dónde va cada autobús (en las líneas y en la zona del mapa que miras). También se activa con el botón ${busIco()} del mapa.')}</div>
       <div class="set-group"><h3>Revisar al abrir la app</h3>${segBtns('revisarCada', [[0, 'Nunca'], [1, 'Cada hora'], [3, 'Cada 3 h'], [6, 'Cada 6 h']], settings.revisarCada)}
         <p>Comprueba el saldo y la caducidad de tus tarjetas guardadas al abrir la app, como mucho con esta frecuencia, y te avisa si el saldo está bajo.</p></div>
       <div class="set-group"><h3>Avisos de TUSSAM (desvíos, obras, horarios especiales)</h3>${segBtns('avisosTussam', [['mias', 'De mis líneas'], ['todas', 'Todos'], ['no', 'No avisar']], settings.avisosTussam)}
