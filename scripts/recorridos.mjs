@@ -231,7 +231,8 @@ async function matchTrozo(pts) {            // pts: [[lat,lon]...] (<=95); devue
   const url = `${OSRM}/match/v1/driving/${coords}?overview=full&geometries=geojson&gaps=ignore&tidy=true&radiuses=${rad}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'BusSev (app personal)' }, signal: AbortSignal.timeout(15000) });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok || j.code !== 'Ok' || !Array.isArray(j.matchings) || !j.matchings.length) return null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}${j.message ? ` ${j.message}` : ''}`);
+  if (j.code !== 'Ok' || !Array.isArray(j.matchings) || !j.matchings.length) throw new Error(`respuesta ${j.code || 'sin matchings'}`);
   const out = [];
   for (const mm of j.matchings) for (const c of (mm.geometry?.coordinates || [])) {
     const q = [c[1], c[0]], l = out[out.length - 1];
@@ -239,6 +240,7 @@ async function matchTrozo(pts) {            // pts: [[lat,lon]...] (<=95); devue
   }
   return out.length >= 2 ? out : null;
 }
+let avisoPegar = 0;   // para explicar en el log, una vez, por qué no se pega (sin llenarlo de líneas)
 /* Pega un trazado entero: lo submuestrea (OSRM /match admite pocas coordenadas por consulta y no necesita
    tanto detalle), lo manda por trozos y los une. Si un trozo falla, se descarta todo (se deja el oficial). */
 export async function pegarAOSM(pts, matcher = matchTrozo) {
@@ -250,8 +252,9 @@ export async function pegarAOSM(pts, matcher = matchTrozo) {
   const out = [];
   for (let i = 0; i < m.length - 1;) {
     const trozo = m.slice(i, i + 95);
-    let snapped;
-    try { snapped = await matcher(trozo); } catch { snapped = null; }
+    let snapped = null;
+    try { snapped = await matcher(trozo); }
+    catch (e) { if (avisoPegar++ < 3) console.log(`  Pegado a la calle (OSM) no disponible: OSRM ${e.message}. Esa(s) línea(s) se quedan con el trazado oficial.`); return null; }
     if (!snapped) return null;
     for (const q of snapped) { const l = out[out.length - 1]; if (!l || l[0] !== q[0] || l[1] !== q[1]) out.push(q); }
     i += trozo.length - 1;
