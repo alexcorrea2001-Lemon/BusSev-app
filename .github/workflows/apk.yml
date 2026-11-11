@@ -87,7 +87,10 @@ jobs:
       - name: Calcular recorridos por calle (opcional)
         if: steps.seguir.outputs.si == 'si'
         continue-on-error: true
-        timeout-minutes: 12
+        timeout-minutes: 18
+        env:
+          LIMITE_COMPLETO_MIN: "15"
+          LIMITE_TOTAL_MIN: "16"
         run: |
           node scripts/recorridos.mjs || echo "Recorridos omitidos; la app usara lineas rectas."
 
