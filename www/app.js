@@ -859,7 +859,7 @@ function aplicarCapasMapa(bm) {
   const vis = (id, on) => { try { if (m.getLayer(id)) m.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); } catch { /* */ } };
   vis('bs-stops', settings.mapaParadas !== false);
   vis('bs-stops-hit', settings.mapaParadas !== false);
-  for (const id of ['bs-route-casing', 'bs-route', 'bs-route-stops', 'bs-paths']) vis(id, settings.mapaRecorridos !== false);
+  for (const id of ['bs-route-casing', 'bs-route', 'bs-route-stops', 'bs-paths-casing', 'bs-paths']) vis(id, settings.mapaRecorridos !== false);
   // Nombres de calles y sitios = las capas de texto del mapa base
   try { for (const l of m.getStyle()?.layers || []) if (l.type === 'symbol') m.setLayoutProperty(l.id, 'visibility', settings.mapaCalles !== false ? 'visible' : 'none'); } catch { /* */ }
 }
@@ -890,10 +890,12 @@ function addRouteLayers(bm) {
   bm.layer({ id: 'bs-route-casing', type: 'line', source: 'bs-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000000', 'line-opacity': 0.35, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 16, 10] } });
   bm.layer({ id: 'bs-route', type: 'line', source: 'bs-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 6.5] } });
   bm.layer({ id: 'bs-route-stops', type: 'circle', source: 'bs-route-stops', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 16, 5.5], 'circle-color': '#ffffff', 'circle-stroke-color': ['get', 'color'], 'circle-stroke-width': 2.2 } });
-  bm.layer({ id: 'bs-paths', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 6], 'line-opacity': 0.95,
-    // Desplazamiento lateral por línea: si varios buses van por la misma calle, sus caminos se ven en
-    // paralelo (pegados) en vez de taparse. El valor lo pone drawApproaching en cada camino.
-    'line-offset': ['interpolate', ['linear'], ['zoom'], 12, ['*', ['coalesce', ['get', 'carril'], 0], 2.2], 16, ['*', ['coalesce', ['get', 'carril'], 0], 5]] } });
+  // Desplazamiento lateral por línea (lo pone drawApproaching en cada camino): si varios buses van por la
+  // misma calle, sus caminos se ven en paralelo en vez de taparse. Mismo valor para el borde y el relleno.
+  const offsetPaths = ['interpolate', ['linear'], ['zoom'], 12, ['*', ['coalesce', ['get', 'carril'], 0], 3.2], 16, ['*', ['coalesce', ['get', 'carril'], 0], 8]];
+  // Borde oscuro debajo de cada camino: así dos líneas de color parecido (p. ej. dos azules) se separan.
+  bm.layer({ id: 'bs-paths-casing', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': mapIsDark() ? '#0b0c0f' : '#ffffff', 'line-opacity': 0.9, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 16, 9], 'line-offset': offsetPaths } });
+  bm.layer({ id: 'bs-paths', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 6], 'line-opacity': 0.98, 'line-offset': offsetPaths } });
 }
 /* Marcadores HTML (autobuses y parada) */
 function busEl(label, color, clave) {
