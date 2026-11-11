@@ -6,13 +6,14 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { recorridosOSM, mejorEncaje } from './recorridos_osm.mjs';
+import { recorridosTussam, encajarOficial, ensamblar } from './recorridos_tussam.mjs';
 
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
 const MAX_WAYPOINTS = 80;
 let MAX_AJUSTE = 10;          // el servidor público de OSRM solo encaja trazados de pocas paradas de una vez
-const VERSION_CALCULO = 8;    // 8: consulta OSM solo-TUSSAM (fiable) + tolerancia 110 m → más líneas con trazado real
-                              //    (7: emparejamiento por mediana; 6: shapes GTFS → OSM → OSRM)
+const VERSION_CALCULO = 9;    // 9: trazado OFICIAL de TUSSAM (datos abiertos del Ayuntamiento) como 1ª fuente
+                              //    (8: OSM solo-TUSSAM + tolerancia 110 m; 7: mediana; 6: shapes GTFS → OSM → OSRM)
 const PAUSA_MS = Number(process.env.OSRM_PAUSA_MS ?? 1100); // el servidor público pide como mucho 1 consulta por segundo
 
 const ctx = { window: {} };
@@ -26,9 +27,18 @@ let shapesGtfs = {};
 try { shapesGtfs = JSON.parse(fs.readFileSync(`${ROOT}scripts/_shapes.json`, 'utf8')) || {}; } catch { /* no hay: se usa OSRM */ }
 if (Object.keys(shapesGtfs).length) console.log(`Geometría real del GTFS para ${Object.keys(shapesGtfs).length} líneas-sentido: se usa en vez de OSRM.`);
 
+/* Trazado OFICIAL de TUSSAM (datos abiertos del Ayuntamiento de Sevilla, capa "TUSSAM_Lineas"): geometría
+   real por calle de (casi) todas las líneas, ida y vuelta. Es la fuente MÁS fiable y completa; se usa antes
+   que OpenStreetMap y que OSRM. El archivo geojson/lineas.json lo mantiene al día scripts/actualizar_datos.sh. */
+let recOficial = new Map();
+try { recOficial = recorridosTussam(); if (recOficial.size) console.log(`Trazado oficial de TUSSAM (datos abiertos): ${recOficial.size} líneas con geometría real por calle.`); }
+catch (e) { console.log(`Trazado oficial de TUSSAM no disponible (${e.message}): se usará OpenStreetMap/OSRM.`); }
+// Firma del trazado oficial (nº de puntos por línea): si cambia, se vuelve a calcular aunque las paradas sigan igual.
+const firmaOficial = [...recOficial.entries()].map(([r, a]) => [r, a.reduce((n, c) => n + c.pts.length, 0)]).sort();
+
 /* 0) Si ya se calcularon (y salieron completos) para estos mismos datos, no se repite: compila más rápido
       y no se carga a los servidores públicos de mapas. */
-const FIRMA = crypto.createHash('sha1').update(JSON.stringify([VERSION_CALCULO, D.recorridos, D.paradas.map((p) => [p.codigo, p.latitud, p.longitud])])).digest('hex').slice(0, 16);
+const FIRMA = crypto.createHash('sha1').update(JSON.stringify([VERSION_CALCULO, D.recorridos, D.paradas.map((p) => [p.codigo, p.latitud, p.longitud]), firmaOficial])).digest('hex').slice(0, 16);
 if (!process.env.BUSSEV_SOLO_FUNCIONES && !process.env.FORZAR_RECORRIDOS) {
   try {
     const previo = fs.readFileSync(`${ROOT}www/recorridos.js`, 'utf8');
@@ -184,6 +194,26 @@ export const tramoRaro = (leg, a, b) => {
   const recta = hav(a, b);
   return !leg.pts.length || esRodeo(leg.distancia, recta) || desvio(leg.pts, a, b) > Math.max(150, recta * 0.6);
 };
+
+/* Ruta POR CALLE que pasa por una lista corta de paradas (el extremo de una línea que el trazado oficial
+   no cubre). Reutiliza OSRM como el resto; si un tramo daría un rodeo que el autobús no da, ese tramo va en
+   recta; si OSRM no está disponible o no queda tiempo, toda la cabeza/cola va en recta (como antes). Nunca
+   dibuja un rodeo: en el peor caso, línea recta entre esas pocas paradas. */
+async function bordeCalle(stops, rapido) {
+  const recta = stops.map((s) => [s.lat, s.lon]);
+  if (stops.length < 2 || !quedaTiempo(LIMITE_TOTAL)) return recta;
+  let legs;
+  try { legs = await tramos(stops, rapido); await esperar(PAUSA_MS); }
+  catch { return recta; }
+  if (!legs || legs.length !== stops.length - 1) return recta;
+  const pts = [[stops[0].lat, stops[0].lon]];
+  for (let i = 0; i < legs.length; i++) {
+    const a = [stops[i].lat, stops[i].lon], b = [stops[i + 1].lat, stops[i + 1].lon];
+    const tramo = (!legs[i] || tramoRaro(legs[i], a, b)) ? [b] : [...legs[i].pts.slice(1, -1), b];
+    for (const q of tramo) pts.push(q);
+  }
+  return pts.length >= 2 ? pts : recta;
+}
 let rehechos = 0, rarosQuedan = 0;
 const MAX_REHECHOS = Number(process.env.OSRM_MAX_REHECHOS ?? 150);
 // GitHub corta este paso a los 10 min: se deja margen para guardar siempre lo calculado
@@ -196,7 +226,7 @@ let rapidas = 0, sinCalcular = 0, fallidas = 0;
 
 const salida = {};
 const ajustes = new Map();   // parada -> { dist, pos } (posición en la calle)
-let ok = 0, rectos = 0, shapesUsados = 0, osmUsados = 0;
+let ok = 0, rectos = 0, shapesUsados = 0, osmUsados = 0, oficialUsados = 0;
 if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
   const stops = lista.sort((a, b) => a.orden - b.orden);
   if (stops.length < 2) continue;
@@ -217,8 +247,33 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
     ok++; shapesUsados++; process.stdout.write(`✓ ${k} (geometría real del GTFS, ${stops.length} paradas)\n`);
     continue;
   }
-  // 2) Trazado real de OpenStreetMap (relación route=bus de la línea), si encaja bien con las paradas
   const refOsm = String(k.split('|')[0]).replace(/^0+/, '');
+  // 1.5) Trazado OFICIAL de TUSSAM (datos abiertos del Ayuntamiento de Sevilla): geometría real por calle.
+  //      Es la fuente más fiable y completa: se prefiere a OpenStreetMap y a OSRM. encajarOficial elige, entre
+  //      las variantes de la línea, la que encaja con las paradas y en su sentido, y prolonga el trazado en
+  //      recta hasta las paradas del extremo que no cubra (para que la línea dibujada llegue a todas).
+  const candOf = recOficial.get(refOsm);
+  if (candOf && candOf.length) {
+    const m = encajarOficial(candOf, stops.map((s) => [s.lat, s.lon]));
+    if (m) {
+      // Si el trazado oficial no llega a algún extremo (porque el dato publicado es de una variante distinta
+      // o algo más antiguo que las paradas del GTFS), ese trozo del extremo se dibuja siguiendo las calles
+      // (OSRM) en vez de en recta. El cuerpo central es siempre el trazado oficial.
+      const rapido = !quedaTiempo(LIMITE_COMPLETO);
+      const cabeza = m.firstCovered > 0 ? await bordeCalle(stops.slice(0, m.firstCovered + 1), rapido) : [];
+      const cola = m.lastCovered < stops.length - 1 ? await bordeCalle(stops.slice(m.lastCovered), rapido) : [];
+      const r = ensamblar(m, stops.map((s) => [s.lat, s.lon]), cabeza, cola);
+      const pts = r.pts.map(([la, lo]) => [Math.round(la * 1e5) / 1e5, Math.round(lo * 1e5) / 1e5]);
+      const d = []; let pl = 0, pn = 0;
+      for (const [lat, lon] of pts) { const L = Math.round(lat * 1e5), N = Math.round(lon * 1e5); d.push(L - pl, N - pn); pl = L; pn = N; }
+      salida[k] = { d, s: r.idx };
+      ok++; oficialUsados++;
+      const borde = m.firstCovered + (stops.length - 1 - m.lastCovered);
+      process.stdout.write(`✓ ${k} (trazado oficial de TUSSAM, ${stops.length} paradas, ±${Math.round(m.coste)} m${borde ? `, ${borde} de extremo por calle` : ''})\n`);
+      continue;
+    }
+  }
+  // 2) Trazado real de OpenStreetMap (relación route=bus de la línea), si encaja bien con las paradas
   const candOsm = osmRec.get(refOsm);
   if (candOsm && candOsm.length) {
     const m = mejorEncaje(candOsm, stops.map((s) => [s.lat, s.lon]));
@@ -307,8 +362,8 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
 }
 
 if (!process.env.BUSSEV_SOLO_FUNCIONES) fs.writeFileSync(`${ROOT}www/recorridos.js`,
-  `/* Recorridos: trazado real de OpenStreetMap (© colaboradores de OSM, ODbL) donde la línea está mapeada; el resto por calle con OSRM. ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n` +
+  `/* Recorridos: trazado OFICIAL de TUSSAM (© Ayuntamiento de Sevilla, datos abiertos) donde está publicado; si no, trazado real de OpenStreetMap (© colaboradores de OSM, ODbL); el resto por calle con OSRM. ${new Date().toISOString().slice(0, 10)} */\nwindow.BUSSEV_RECORRIDOS=${JSON.stringify(salida)};\n` +
   `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...[...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)]), ...osm]))};\n` +
   `/* Posición de las paradas según OpenStreetMap (© colaboradores de OpenStreetMap, ODbL); se reutiliza si un día no contesta */\nwindow.BUSSEV_PARADAS_OSM=${JSON.stringify(Object.fromEntries(osm))};\n` +
   `window.BUSSEV_RECORRIDOS_FIRMA="${FIRMA}";window.BUSSEV_RECORRIDOS_COMPLETO=${!rapidas && !sinCalcular && !fallidas && osm.size > 0 && !osmReutilizado};\n`);
-if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido (${shapesUsados} del GTFS, ${osmUsados} de OpenStreetMap, el resto por OSRM), ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle; ${rapidas} líneas en modo rápido, ${sinCalcular} sin calcular.`);
+if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido (${oficialUsados} del trazado oficial de TUSSAM, ${shapesUsados} del GTFS, ${osmUsados} de OpenStreetMap, el resto por OSRM), ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle; ${rapidas} líneas en modo rápido, ${sinCalcular} sin calcular.`);

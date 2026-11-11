@@ -15,6 +15,42 @@ FUENTES=(
   "https://files.mobilitydatabase.org/mdb-2770/latest.zip"
 )
 
+# --- Trazado OFICIAL de las líneas (datos abiertos del Ayuntamiento de Sevilla, capa "TUSSAM_Lineas") ---
+# Es la geometría real por calle de (casi) todas las líneas. Se intenta refrescar geojson/lineas.json desde el
+# portal de datos abiertos; si no se puede (sin conexión, el portal ha cambiado, datos raros...), se queda el
+# archivo que ya lleva el repositorio y la app funciona igual. Así, si TUSSAM cambia el trazado de una línea,
+# la siguiente compilación lo coge automáticamente. Se puede forzar otro origen con el secreto TUSSAM_LINEAS_ITEM.
+ITEM_LINEAS="${TUSSAM_LINEAS_ITEM:-c5e6ecf63aa944c8a09eb1e65e72d8f4}"   # item "TUSSAM_Lineas" en ArcGIS Online (IDE Sevilla)
+LGJ="$TMP/lineas.json"
+echo "Buscando el trazado oficial de las líneas (datos abiertos de Sevilla)…"
+if SRV="$(curl -fsSL --max-time 60 "https://www.arcgis.com/sharing/rest/content/items/${ITEM_LINEAS}?f=json" 2>/dev/null \
+          | python3 -c 'import sys,json;print((json.load(sys.stdin).get("url") or "").rstrip("/"))' 2>/dev/null)" \
+   && [ -n "$SRV" ]; then
+  case "$SRV" in
+    */FeatureServer|*/MapServer) Q="$SRV/0/query" ;;
+    */[0-9])                     Q="$SRV/query"   ;;
+    *)                           Q="$SRV/0/query" ;;
+  esac
+  if curl -fsSL --max-time 180 --retry 2 -G "$Q" \
+        --data-urlencode "where=1=1" --data-urlencode "outFields=*" \
+        --data-urlencode "outSR=4326" --data-urlencode "f=geojson" -o "$LGJ" 2>/dev/null \
+     && python3 -c '
+import sys,json
+d=json.load(open(sys.argv[1]))
+f=d.get("features") or []
+assert d.get("type")=="FeatureCollection" and len(f)>=100, "pocas lineas"
+assert any(str((x.get("geometry") or {}).get("type","")).endswith("LineString") for x in f), "sin geometria"
+' "$LGJ" 2>/dev/null; then
+    mkdir -p geojson
+    cp "$LGJ" geojson/lineas.json
+    echo "  Trazado oficial de las líneas actualizado (geojson/lineas.json)."
+  else
+    echo "  No se ha podido descargar el trazado oficial: se usa el que lleva el repositorio."
+  fi
+else
+  echo "  No se ha localizado el servicio del trazado oficial: se usa el que lleva el repositorio."
+fi
+
 ok=0
 for url in "${FUENTES[@]}"; do
   cab=()
