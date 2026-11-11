@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { recorridosOSM, mejorEncaje } from './recorridos_osm.mjs';
-import { recorridosTussam, encajarOficial, ensamblar } from './recorridos_tussam.mjs';
+import { recorridosTussam, encajarOficial, indices } from './recorridos_tussam.mjs';
 
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -214,6 +214,58 @@ async function bordeCalle(stops, rapido) {
   }
   return pts.length >= 2 ? pts : recta;
 }
+
+/* Monta la línea de una línea-sentido a partir del trazado oficial: recorre las paradas en orden y, entre
+   cada dos seguidas, usa el trozo del trazado OFICIAL (si ambas están sobre él) o, si alguna cae lejos
+   (un extremo que el dato no cubre, o una parada a mitad de recorrido por la que el trazado va por otra
+   calle), la ruta POR CALLE que pasa por ellas (OSRM, recta de respaldo). Así ninguna parada queda suelta
+   y nada se dibuja recto por encima de las casas. Si todas las paradas están sobre el trazado oficial,
+   devuelve el trazado tal cual (caso de casi todas las líneas). Devuelve { pts, idx }. */
+async function montarOficial(m, stopsLL, rapido) {
+  // Solo se reroutea por calle una parada que caiga CLARAMENTE fuera del trazado oficial (un extremo que el
+  // dato no cubre, o una parada de en medio por la que el trazado va por otra calle). Una imprecisión pequeña
+  // (la parada un poco a un lado de la calzada) se deja sobre el trazado oficial: no merece recalcular nada.
+  const U = Number(process.env.OFICIAL_REROUTE_M ?? 130);
+  const { body, bodyIdx, dists } = m;
+  const n = stopsLL.length, L = body.length;
+  const lejos = dists.map((d) => d > U);
+  if (!lejos.some(Boolean)) return { pts: body, idx: bodyIdx };   // todo sobre el trazado oficial: tal cual
+
+  const punto = (k) => (lejos[k] ? stopsLL[k] : body[bodyIdx[k]]);   // dónde se coloca cada parada
+  const pts = [];
+  const mete = (arr, salta) => {
+    for (let t = salta ? 1 : 0; t < arr.length; t++) {
+      const q = arr[t], l = pts[pts.length - 1];
+      if (!Array.isArray(q) || !Number.isFinite(q[0]) || !Number.isFinite(q[1])) continue;
+      if (!l || l[0] !== q[0] || l[1] !== q[1]) pts.push(q);
+    }
+  };
+  // Cabecera del trazado antes de la 1ª parada (si esa parada está sobre el trazado), para no perderla.
+  if (!lejos[0] && bodyIdx[0] > 0) mete(body.slice(0, bodyIdx[0] + 1), false);
+  else mete([punto(0)], false);
+
+  let k = 0;
+  while (k < n - 1) {
+    if (lejos[k] || lejos[k + 1]) {
+      // tramo con parada lejos: se agrupa toda la racha y se calcula por calle de una vez
+      let j = k; while (j < n - 1 && (lejos[j] || lejos[j + 1])) j++;
+      const racha = [];
+      for (let t = k; t <= j; t++) { const p = punto(t); racha.push({ lat: p[0], lon: p[1] }); }
+      mete(await bordeCalle(racha, rapido), true);
+      k = j;
+    } else {
+      // racha de paradas sobre el trazado oficial: se usan sus trozos tal cual
+      let j = k; while (j < n - 1 && !(lejos[j] || lejos[j + 1])) j++;
+      for (let t = k; t < j; t++) mete(body.slice(bodyIdx[t], bodyIdx[t + 1] + 1), true);
+      k = j;
+    }
+  }
+  // Cola del trazado tras la última parada (si esa parada está sobre el trazado).
+  if (!lejos[n - 1] && bodyIdx[n - 1] < L - 1) mete(body.slice(bodyIdx[n - 1] + 1), false);
+
+  const linea = pts.length >= 2 ? pts : body;
+  return { pts: linea, idx: indices(linea, stopsLL), rerutadas: lejos.filter(Boolean).length };
+}
 let rehechos = 0, rarosQuedan = 0;
 const MAX_REHECHOS = Number(process.env.OSRM_MAX_REHECHOS ?? 150);
 // GitHub corta este paso a los 10 min: se deja margen para guardar siempre lo calculado
@@ -256,20 +308,17 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
   if (candOf && candOf.length) {
     const m = encajarOficial(candOf, stops.map((s) => [s.lat, s.lon]));
     if (m) {
-      // Si el trazado oficial no llega a algún extremo (porque el dato publicado es de una variante distinta
-      // o algo más antiguo que las paradas del GTFS), ese trozo del extremo se dibuja siguiendo las calles
-      // (OSRM) en vez de en recta. El cuerpo central es siempre el trazado oficial.
+      // El cuerpo es el trazado oficial; las paradas que caigan lejos de él (un extremo que el dato no cubre
+      // o una parada a mitad de recorrido por la que el trazado va por otra calle) se enlazan siguiendo las
+      // calles (OSRM, recta de respaldo). Así ninguna parada queda suelta.
       const rapido = !quedaTiempo(LIMITE_COMPLETO);
-      const cabeza = m.firstCovered > 0 ? await bordeCalle(stops.slice(0, m.firstCovered + 1), rapido) : [];
-      const cola = m.lastCovered < stops.length - 1 ? await bordeCalle(stops.slice(m.lastCovered), rapido) : [];
-      const r = ensamblar(m, stops.map((s) => [s.lat, s.lon]), cabeza, cola);
+      const r = await montarOficial(m, stops.map((s) => [s.lat, s.lon]), rapido);
       const pts = r.pts.map(([la, lo]) => [Math.round(la * 1e5) / 1e5, Math.round(lo * 1e5) / 1e5]);
       const d = []; let pl = 0, pn = 0;
       for (const [lat, lon] of pts) { const L = Math.round(lat * 1e5), N = Math.round(lon * 1e5); d.push(L - pl, N - pn); pl = L; pn = N; }
       salida[k] = { d, s: r.idx };
       ok++; oficialUsados++;
-      const borde = m.firstCovered + (stops.length - 1 - m.lastCovered);
-      process.stdout.write(`✓ ${k} (trazado oficial de TUSSAM, ${stops.length} paradas, ±${Math.round(m.coste)} m${borde ? `, ${borde} de extremo por calle` : ''})\n`);
+      process.stdout.write(`✓ ${k} (trazado oficial de TUSSAM, ${stops.length} paradas, ±${Math.round(m.coste)} m${r.rerutadas ? `, ${r.rerutadas} por calle` : ''})\n`);
       continue;
     }
   }

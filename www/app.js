@@ -308,6 +308,7 @@ const ICON = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   route: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 6H15a3.5 3.5 0 0 1 0 7H9a3.5 3.5 0 0 0 0 7h6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4ZM13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
+  silla: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4" r="2" fill="currentColor"/><path d="M10 6.5v4.5h4.5l2.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.8 15.5A5 5 0 1 1 9 11.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
 /* ================================================================== */
@@ -1759,7 +1760,13 @@ views.parada = (el, codigo) => {
   $('.back-btn', el).onclick = goBack;
   function headHTML() {
     const fb = favButton(info, () => paintTools());
-    return { fb, html: backHead(`<div class="grow"><h2>${esc(info.nombre)}</h2><p><span class="stop-num" style="display:inline-grid;height:22px;min-width:0;font-size:15px;vertical-align:-3px">${esc(codigo)}</span> ${esc(info.direccion_completa || '')}</p></div>${fb.html}`) };
+    // Accesibilidad de la parada (del GTFS oficial, si TUSSAM lo publica): 1 = accesible, 0 = no accesible.
+    const acc = info.accesible === 1
+      ? `<span class="pill pill-acc" title="Parada accesible para silla de ruedas">${ICON.silla}Accesible</span>`
+      : info.accesible === 0
+        ? `<span class="pill pill-acc-no" title="Parada sin acceso para silla de ruedas">${ICON.silla}No accesible</span>`
+        : '';
+    return { fb, html: backHead(`<div class="grow"><h2>${esc(info.nombre)}</h2><p><span class="stop-num" style="display:inline-grid;height:22px;min-width:0;font-size:15px;vertical-align:-3px">${esc(codigo)}</span> ${esc(info.direccion_completa || '')}</p>${acc}</div>${fb.html}`) };
   }
   function paintTools() {
     const box = $('#p-tools', el);

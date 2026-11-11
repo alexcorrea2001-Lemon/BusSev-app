@@ -101,6 +101,11 @@ for c in sorted(usadas, key=lambda x: int(x) if x.isdigit() else 10**9):
     p = {'codigo': c, 'nombre': ' '.join(s['stop_name'].split()), 'latitud': round(float(s['stop_lat']), 6), 'longitud': round(float(s['stop_lon']), 6)}
     for k in ('calle', 'numero', 'codigo_postal', 'municipio', 'direccion_completa'):
         if o.get(k): p[k] = o[k]
+    # Accesibilidad para silla de ruedas, si el GTFS la publica (stops.txt → wheelchair_boarding):
+    # 1 = accesible, 2 = no accesible, 0/vacío = sin dato. Se guarda solo cuando se sabe.
+    wb = str(s.get('wheelchair_boarding', '') or '').strip()
+    if wb == '1': p['accesible'] = 1
+    elif wb == '2': p['accesible'] = 0
     paradas.append(p)
 fi, ff = feed['feed_start_date'], feed['feed_end_date']
 data = {'generado': f'{fi[:4]}-{fi[4:6]}-{fi[6:]}', 'caduca': f'{ff[:4]}-{ff[4:6]}-{ff[6:]}', 'fuente': 'GTFS oficial de TUSSAM (Punto de Acceso Nacional)',

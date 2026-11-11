@@ -1,11 +1,18 @@
 # BusSev 🚌
 
 **BusSev** es una app para Android para moverte en los autobuses de **TUSSAM** (Sevilla).
-Te dice cuánto le falta a tu autobús, dónde va cada autobús en el mapa, cuánto saldo tiene tu tarjeta
-y los avisos de desvíos y obras. Es gratis, no tiene anuncios y no te pide registrarte.
+Te dice cuánto le falta a tu autobús, dónde va cada uno en el mapa (siguiendo las calles de verdad),
+cuánto saldo tiene tu tarjeta y los avisos de desvíos y obras. Es gratis, no tiene anuncios y no te pide registrarte.
 
 > BusSev es un proyecto personal e independiente. **No es la app oficial de TUSSAM** ni tiene relación con TUSSAM.
-> Los datos los saca de las webs públicas de TUSSAM, igual que harías tú con el navegador.
+> Los datos los saca de las webs y los datos abiertos públicos de TUSSAM y del Ayuntamiento de Sevilla,
+> igual que harías tú con el navegador.
+
+<!-- 📸 CAPTURAS: ponlas en la carpeta docs/capturas/ del repositorio. Donde veas una línea
+     ![texto](docs/capturas/algo.png), sube tu imagen con ese mismo nombre y aparecerá sola.
+     Puedes cambiar los nombres o quitar las que no quieras. -->
+
+![BusSev en el móvil](docs/capturas/portada.png)
 
 ---
 
@@ -16,26 +23,44 @@ Guarda las paradas que más usas y ve de un vistazo cuánto le falta a cada auto
 - Ponle un nombre a cada parada («Casa», «Trabajo», «Facultad») y un color.
 - Elige qué líneas quieres ver en cada parada, para no ver autobuses que nunca coges.
 - Ordénalas como quieras: al subir o bajar una, ves al momento en qué puesto queda.
+- Arriba te avisa de lo que importa hoy: **buses nocturnos**, **servicios especiales** (Feria, Semana Santa),
+  **festivos**, **saldo bajo** o **tarjeta a punto de caducar**, y si estás **sin conexión**.
+
+![Pantalla de Favoritas](docs/capturas/favoritas.png)
 
 ### 🗺️ Mapa
 - Todas las paradas de Sevilla en el mapa.
-- Toca una línea y verás su recorrido y **los autobuses que van por ella ahora mismo**.
+- Toca una línea y verás su **recorrido real por las calles** y **los autobuses que van por ella ahora mismo**.
 - Los autobuses se mueven solos por el mapa y miran hacia donde van.
 - En la parada puedes poner el mapa en **pantalla completa**.
 
+> El recorrido de cada línea es el **trazado oficial** que publica el Ayuntamiento de Sevilla en datos abiertos,
+> así que el autobús va por su calle de verdad, no en línea recta entre paradas. Si TUSSAM cambia una línea,
+> BusSev lo coge solo en la siguiente compilación (ver la parte técnica).
+
 > TUSSAM no publica el GPS de sus autobuses: BusSev calcula dónde está cada uno a partir de la distancia
 > que da TUSSAM. Es una posición **aproximada**, pero muy cercana a la real.
+
+![El recorrido de una línea en el mapa](docs/capturas/mapa-linea.png)
 
 ### 🚏 Parada
 - Minutos que le faltan a cada línea, con el siguiente autobús.
 - Toca una línea para que **te avise cuando esté llegando** (notificación en el móvil).
 - Elige qué líneas ver tocando sus botones (03, 06, 34…).
 - Las líneas que paran allí y los avisos de TUSSAM que les afectan.
+- Si TUSSAM lo publica, verás si la parada es **accesible** para silla de ruedas (♿).
+
+![Ficha de una parada](docs/capturas/parada.png)
+
+### 🔎 Buscador
+En la barra de arriba, en cualquier pantalla, busca **por número de poste**, **por nombre de la parada o la calle**
+o **por línea**. Los resultados salen al momento mientras escribes.
 
 ### 🛣️ Líneas
 - Todas las líneas, con filtro de nocturnas.
 - Lista de paradas de cada línea con el **tiempo de llegada** de los autobuses al lado de cada parada
   y las demás líneas que paran en ella.
+- Si una línea tiene un **desvío** por obras o un evento, te lo avisa con enlace al aviso.
 
 ### 📍 Cerca
 Las paradas que tienes cerca y cuánto le falta a cada autobús. Si tienes la ubicación apagada, te avisa al momento.
@@ -48,15 +73,28 @@ También tiene **Cómo llegar**: te dice qué autobús coger (directo o con un t
 - **Avisos**: te avisa si te queda poco saldo o si la tarjeta va a caducar.
 - **Tarifas y títulos de viaje** actualizados desde la web de TUSSAM.
 
+![Tarjeta TUSSAM leída por NFC](docs/capturas/tarjeta.png)
+
 ### ⚠️ Avisos de TUSSAM
-Desvíos, obras y horarios especiales. BusSev los revisa al abrirse y te manda una notificación si hay uno nuevo
-en las líneas de tus paradas favoritas.
+Desvíos, obras y horarios especiales (con sus **PDF e imágenes**). BusSev los revisa al abrirse y te manda una
+notificación si hay uno nuevo en las líneas de tus paradas favoritas.
+
+### 📲 Widget de inicio
+Pon una parada en la **pantalla de inicio** del móvil y ve los próximos autobuses sin abrir la app.
+Elige qué líneas ver y, al tocarlo, se abre directo en esa parada.
+
+![Widget en la pantalla de inicio](docs/capturas/widget.png)
+
+### ✈️ Sin conexión
+Si te quedas sin datos, BusSev te sigue enseñando los **últimos tiempos que tenía** (avisándote de que no están al día)
+y la información de paradas y líneas, que va guardada dentro de la app.
 
 ### 🎨 A tu gusto
 - Tema claro u oscuro, **colores** (incluidos pasteles) y **colores de fondo**.
 - **Temáticas** que cambian solas: Navidad, Semana Santa, Feria y Halloween, con adornos, y si quieres,
   **pasos, coches de caballos o carrozas** en el mapa en vez de autobuses.
-- **Accesibilidad**: letra grande, alto contraste, botones grandes, menos animaciones y lectura en voz alta.
+- **Accesibilidad**: **modo sencillo** (deja solo lo esencial y botones grandes), letra grande, alto contraste,
+  menos animaciones y lectura en voz alta.
 
 ---
 
@@ -119,7 +157,7 @@ BusSev está hecha con **Capacitor** (una web dentro de una app Android). No nec
 **GitHub compila el APK por ti**.
 
 ### Compilar con GitHub
-1. Sube el proyecto a un repositorio de GitHub (las carpetas `www`, `android`, `scripts` y `.github`).
+1. Sube el proyecto a un repositorio de GitHub (las carpetas `www`, `android`, `scripts`, `geojson` y `.github`).
    - GitHub solo deja subir **100 archivos de golpe** desde la web: sube primero `www` y luego `android`.
    - La carpeta `.github` empieza por punto y puede estar oculta (en Windows: *Vista → Elementos ocultos*).
 2. En la pestaña **Actions**, abre **Compilar APK → Run workflow**. Tarda unos 5 minutos.
@@ -136,9 +174,13 @@ encima de la tuya). Va guardada en los *Secrets* del repositorio, que nadie pued
 | `BUSSEV_KEYSTORE_PASSWORD` | Contraseña del archivo de la clave |
 | `BUSSEV_KEY_ALIAS` | Nombre de la clave dentro del archivo |
 | `BUSSEV_KEY_PASSWORD` | Contraseña de la clave |
+| `TUSSAM_SECRETS_JS` | Las credenciales de la API de TUSSAM (GitHub escribe `www/secrets.js` al compilar) |
 
 Guarda una copia de la clave fuera de GitHub: si la pierdes, las versiones nuevas no se podrán instalar encima
 (habría que desinstalar y volver a instalar, usando antes la copia de seguridad de *Ajustes*).
+
+> **Las credenciales de TUSSAM nunca van en el código.** Viven en el secreto `TUSSAM_SECRETS_JS`; al compilar,
+> GitHub escribe `www/secrets.js` al vuelo y la app lo lee. El archivo `www/secrets.js` está en `.gitignore`.
 
 ### Compilar en tu ordenador (opcional)
 Con Node 20, Java 17 y Android Studio:
@@ -152,7 +194,9 @@ npx cap open android   # en Android Studio: Build → Build APK
 | Dato | Fuente |
 |---|---|
 | Tiempos de llegada | `reddelineas.tussam.es` (la misma que usa la web de TUSSAM) |
-| Paradas, líneas y recorridos | Horarios oficiales de TUSSAM (GTFS), incluidos en `www/data.js` |
+| Paradas, líneas y horarios | Horarios oficiales de TUSSAM (GTFS), incluidos en `www/data.js` |
+| **Recorrido de cada línea en el mapa** | **Trazado oficial de TUSSAM en datos abiertos del Ayuntamiento de Sevilla (IDE Sevilla), en `geojson/lineas.json`** |
+| Accesibilidad de la parada | GTFS oficial de TUSSAM (`wheelchair_boarding`), si lo publica |
 | Saldo de la tarjeta | Web pública de recargas `recargas.tussam.es` |
 | Avisos y tarifas | `www.tussam.es` |
 | Mapa | OpenFreeMap / © colaboradores de OpenStreetMap |
@@ -160,6 +204,40 @@ npx cap open android   # en Android Studio: Build → Build APK
 
 El servidor de recargas de TUSSAM envía su certificado HTTPS sin el intermedio de Sectigo. La app lleva ese
 certificado público (`res/raw/tussam_ca.pem`) para que la verificación sea completa; no se desactiva ninguna comprobación.
+
+### El recorrido de las líneas en el mapa
+El trazado que se dibuja en el mapa se calcula al compilar (`scripts/recorridos.mjs`) y se guarda en `www/recorridos.js`.
+Para cada línea se usa, por orden:
+1. **Trazado oficial de TUSSAM** (datos abiertos del Ayuntamiento de Sevilla, capa «TUSSAM_Lineas»), en `geojson/lineas.json`.
+   Es la geometría real por calle de (casi) todas las líneas: la fuente más fiable y completa (`scripts/recorridos_tussam.mjs`).
+2. **OpenStreetMap** (relaciones `route=bus`) para lo que no esté en el dato oficial (`scripts/recorridos_osm.mjs`, vía Overpass).
+3. **OSRM** (rutas por calle de OpenStreetMap) como último recurso.
+
+Si alguna parada de un extremo o de en medio cae lejos del trazado oficial (porque el dato va por una calle paralela),
+ese tramo concreto se enlaza siguiendo las calles con OSRM, con línea recta solo como último respaldo. Así ninguna
+parada queda suelta y nada se dibuja por encima de las casas.
+
+**Se actualiza solo:** `scripts/actualizar_datos.sh` descarga en cada compilación el trazado oficial más reciente del
+portal de datos abiertos. Si TUSSAM cambia el recorrido de una línea, la siguiente compilación lo coge solo; si el portal
+no responde, se usa el `geojson/lineas.json` que lleva el repositorio. Para forzar otro origen hay un secreto opcional
+`TUSSAM_LINEAS_ITEM` (el identificador del item en ArcGIS Online).
+
+### Paradas y recorridos: se actualizan solos
+Los horarios oficiales de TUSSAM (GTFS) se descargan **solos** cada vez que GitHub compila la app
+(`scripts/actualizar_datos.sh`), de dos fuentes por orden:
+1. El **Punto de Acceso Nacional** del Ministerio de Transportes (donde los publica TUSSAM).
+2. **Mobility Database**, que es una copia del anterior.
+
+Solo se usan si el archivo está completo y es igual o más reciente que el que ya hay; si no, se queda el anterior
+y la compilación sigue. Los datos nuevos (y el trazado oficial) también se guardan en el repositorio.
+
+Además, **el día 1 de cada mes** GitHub mira si TUSSAM ha publicado horarios o recorridos nuevos y, solo si los hay,
+compila una versión nueva por su cuenta.
+
+Si algún día el Ministerio pidiera una clave para descargar, regístrate gratis en nap.transportes.gob.es y guárdala
+en tu repositorio como secreto llamado `NAP_API_KEY` (*Settings → Secrets and variables → Actions*).
+
+Para hacerlo a mano: `python3 scripts/gtfs_a_datos.py <carpeta_gtfs_descomprimida> www/data.js www/data.js`.
 
 ### Servidor propio (opcional)
 En `servidor-saldo/` hay un servidor pequeño (Deno Deploy gratis, o Google Cloud Run) que lee el **saldo** de la tarjeta.
@@ -169,23 +247,6 @@ También sabe pedir los tiempos de llegada, pero **normalmente TUSSAM no le deja
 Cloudflare y a los servidores de internet les pide una comprobación de navegador («Just a moment», error 403).
 Por eso esa opción viene desactivada y los tiempos se piden desde el móvil. El servidor tiene un diagnóstico en
 `/diag/249` que dice qué contesta TUSSAM.
-
-### Paradas y recorridos: se actualizan solos
-Los horarios oficiales de TUSSAM (GTFS) se descargan **solos** cada vez que GitHub compila la app
-(`scripts/actualizar_datos.sh`), de dos fuentes por orden:
-1. El **Punto de Acceso Nacional** del Ministerio de Transportes (donde los publica TUSSAM).
-2. **Mobility Database**, que es una copia del anterior.
-
-Solo se usan si el archivo está completo y es igual o más reciente que el que ya hay; si no, se queda el anterior
-y la compilación sigue. Los datos nuevos también se guardan en el repositorio.
-
-Además, **el día 1 de cada mes** GitHub mira si TUSSAM ha publicado horarios nuevos y, solo si los hay,
-compila una versión nueva por su cuenta.
-
-Si algún día el Ministerio pidiera una clave para descargar, regístrate gratis en nap.transportes.gob.es y guárdala
-en tu repositorio como secreto llamado `NAP_API_KEY` (*Settings → Secrets and variables → Actions*).
-
-Para hacerlo a mano: `python3 scripts/gtfs_a_datos.py <carpeta_gtfs_descomprimida> www/data.js www/data.js`.
 
 ### Número de versión
 El nombre de la versión (v1.1.2, v1.1.3…) está en el archivo **`VERSION`** del repositorio: cámbialo cuando quieras
@@ -202,9 +263,12 @@ para que entres con tu cuenta.
   la **[API TUSSAM](https://github.com/686f6c61/API-TUSSAM)** de 686f6c61, publicada con licencia
   [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) (Copyright (c) 2026 686f6c61).
   Por eso BusSev también es **solo para uso no comercial**. BusSev no usa su servidor: pregunta a TUSSAM desde el móvil.
-- Horarios, paradas y recorridos: GTFS oficial de TUSSAM (Punto de Acceso Nacional). Mapa: OpenFreeMap / OpenStreetMap.
-- Posición exacta de las paradas y recorridos por calle: © colaboradores de [OpenStreetMap](https://www.openstreetmap.org/copyright)
-  (ODbL), consultados al compilar con Overpass y OSRM (`scripts/paradas_osm.mjs` y `scripts/recorridos.mjs`).
+- Horarios, paradas y accesibilidad de las paradas: GTFS oficial de TUSSAM (Punto de Acceso Nacional).
+- **Recorrido de las líneas por calle: trazado oficial de TUSSAM en datos abiertos del Ayuntamiento de Sevilla**
+  (IDE Sevilla / cda-idesevilla), capa «TUSSAM_Lineas».
+- Posición exacta de las paradas y recorridos de respaldo: © colaboradores de [OpenStreetMap](https://www.openstreetmap.org/copyright)
+  (ODbL), consultados al compilar con Overpass y OSRM (`scripts/paradas_osm.mjs`, `scripts/recorridos_osm.mjs` y `scripts/recorridos.mjs`).
+- Mapa: OpenFreeMap / OpenStreetMap.
 
 ### Aviso legal
 Uso **personal y no comercial**. Proyecto independiente, sin relación con TUSSAM. Los servicios de TUSSAM no son

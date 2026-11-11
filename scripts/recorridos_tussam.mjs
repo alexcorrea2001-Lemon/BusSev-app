@@ -89,35 +89,10 @@ export function encajarOficial(cand, stops, maxMediana = Number(process.env.OFIC
     }
   }
   if (!best || best.mediana > maxMediana) return null;
-  const UMBRAL = Number(process.env.OFICIAL_UMBRAL_EXTENSION ?? 70);
-  const n = stops.length;
-  let firstCovered = 0; while (firstCovered < n && best.dists[firstCovered] > UMBRAL) firstCovered++;
-  if (firstCovered >= n) return null;   // ni una parada cerca: trazado que no es (no debería con mediana ok)
-  let lastCovered = n - 1; while (lastCovered > firstCovered && best.dists[lastCovered] > UMBRAL) lastCovered--;
-  return { body: best.pts, bodyIdx: best.idx, firstCovered, lastCovered, coste: best.mediana };
+  return { body: best.pts, bodyIdx: best.idx, dists: best.dists, coste: best.mediana };
 }
 
-/* Monta la línea final: trozo de trazado oficial que va de la primera a la última parada cubierta, con los
-   extremos no cubiertos sustituidos por su ruta por calle (cabeza y cola, que calcula recorridos.mjs con
-   OSRM; en recta si OSRM no está). Recalcula el índice de cada parada sobre la línea final.
-   Devuelve { pts, idx, coste }. */
-export function ensamblar(m, stops, cabeza = [], cola = []) {
-  const sLL = stops.map((s) => (Array.isArray(s) ? s : [s.lat, s.lon]));
-  const L = m.body.length, n = sLL.length;
-  const bodyStart = m.firstCovered > 0 ? m.bodyIdx[m.firstCovered] : 0;
-  const bodyEnd = m.lastCovered < n - 1 ? m.bodyIdx[m.lastCovered] : L - 1;
-  const cuerpo = m.body.slice(bodyStart, Math.max(bodyStart + 1, bodyEnd + 1));
-  // cabeza/cola llegan HASTA/DESDE la parada de anclaje (la primera/última cubierta); se quita ese punto
-  // para no duplicarlo con el cuerpo del trazado.
-  const head = m.firstCovered > 0 ? cabeza.slice(0, -1) : [];
-  const tail = m.lastCovered < n - 1 ? cola.slice(1) : [];
-  const linea = [...head, ...cuerpo, ...tail];
-  const limpio = [];
-  for (const p of linea) {
-    if (!Array.isArray(p) || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
-    const l = limpio[limpio.length - 1];
-    if (!l || l[0] !== p[0] || l[1] !== p[1]) limpio.push(p);
-  }
-  const e = snap(limpio.length >= 2 ? limpio : m.body, sLL);
-  return { pts: limpio.length >= 2 ? limpio : m.body, idx: e.idx, coste: m.coste };
+// Índice (punto más cercano, avanzando hacia delante) de cada parada sobre una polilínea ya montada.
+export function indices(pts, stops) {
+  return snap(pts, stops.map((s) => (Array.isArray(s) ? s : [s.lat, s.lon]))).idx;
 }
