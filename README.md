@@ -12,7 +12,6 @@ cuánto saldo tiene tu tarjeta y los avisos de desvíos y obras. Es gratis, no t
      ![texto](docs/capturas/algo.png), sube tu imagen con ese mismo nombre y aparecerá sola.
      Puedes cambiar los nombres o quitar las que no quieras. -->
 
-![BusSev en el móvil](docs/capturas/portada.png)
 
 ---
 
@@ -83,8 +82,6 @@ notificación si hay uno nuevo en las líneas de tus paradas favoritas.
 Pon una parada en la **pantalla de inicio** del móvil y ve los próximos autobuses sin abrir la app.
 Elige qué líneas ver y, al tocarlo, se abre directo en esa parada.
 
-![Widget en la pantalla de inicio](docs/capturas/widget.png)
-
 ### ✈️ Sin conexión
 Si te quedas sin datos, BusSev te sigue enseñando los **últimos tiempos que tenía** (avisándote de que no están al día)
 y la información de paradas y líneas, que va guardada dentro de la app.
@@ -151,60 +148,6 @@ Sí: *Ajustes → Tus datos → Copia de seguridad*. Te sirve para pasarlas a ot
 
 ---
 
-## Para quien compila la app (parte técnica)
-
-BusSev está hecha con **Capacitor** (una web dentro de una app Android). No necesitas instalar nada en tu ordenador:
-**GitHub compila el APK por ti**.
-
-### Compilar con GitHub
-1. Sube el proyecto a un repositorio de GitHub (las carpetas `www`, `android`, `scripts`, `geojson` y `.github`).
-   - GitHub solo deja subir **100 archivos de golpe** desde la web: sube primero `www` y luego `android`.
-   - La carpeta `.github` empieza por punto y puede estar oculta (en Windows: *Vista → Elementos ocultos*).
-2. En la pestaña **Actions**, abre **Compilar APK → Run workflow**. Tarda unos 5 minutos.
-3. Cuando salga el ✓ verde, el APK aparece en **Releases**.
-
-Todas las versiones van firmadas con la misma clave, por eso se instalan encima sin perder nada.
-**La clave no está en el repositorio** (sería peligroso: cualquiera podría firmar una app falsa que se instalara
-encima de la tuya). Va guardada en los *Secrets* del repositorio, que nadie puede ver, ni en los registros:
-*Settings → Secrets and variables → Actions → New repository secret*:
-
-| Nombre del secreto | Qué es |
-|---|---|
-| `BUSSEV_KEYSTORE_BASE64` | La clave (archivo `.keystore`) convertida a texto base64 |
-| `BUSSEV_KEYSTORE_PASSWORD` | Contraseña del archivo de la clave |
-| `BUSSEV_KEY_ALIAS` | Nombre de la clave dentro del archivo |
-| `BUSSEV_KEY_PASSWORD` | Contraseña de la clave |
-| `TUSSAM_SECRETS_JS` | Las credenciales de la API de TUSSAM (GitHub escribe `www/secrets.js` al compilar) |
-
-Guarda una copia de la clave fuera de GitHub: si la pierdes, las versiones nuevas no se podrán instalar encima
-(habría que desinstalar y volver a instalar, usando antes la copia de seguridad de *Ajustes*).
-
-> **Las credenciales de TUSSAM nunca van en el código.** Viven en el secreto `TUSSAM_SECRETS_JS`; al compilar,
-> GitHub escribe `www/secrets.js` al vuelo y la app lo lee. El archivo `www/secrets.js` está en `.gitignore`.
-
-### Compilar en tu ordenador (opcional)
-Con Node 20, Java 17 y Android Studio:
-```bash
-npm ci
-npx cap sync android
-npx cap open android   # en Android Studio: Build → Build APK
-```
-
-### De dónde salen los datos
-| Dato | Fuente |
-|---|---|
-| Tiempos de llegada | `reddelineas.tussam.es` (la misma que usa la web de TUSSAM) |
-| Paradas, líneas y horarios | Horarios oficiales de TUSSAM (GTFS), incluidos en `www/data.js` |
-| **Recorrido de cada línea en el mapa** | **Trazado oficial de TUSSAM en datos abiertos del Ayuntamiento de Sevilla (IDE Sevilla), en `geojson/lineas.json`** |
-| Accesibilidad de la parada | GTFS oficial de TUSSAM (`wheelchair_boarding`), si lo publica |
-| Saldo de la tarjeta | Web pública de recargas `recargas.tussam.es` |
-| Avisos y tarifas | `www.tussam.es` |
-| Mapa | OpenFreeMap / © colaboradores de OpenStreetMap |
-| Dibujos de autobuses y vehículos de fiesta | Creados por el autor (con ayuda de IA) para BusSev |
-
-El servidor de recargas de TUSSAM envía su certificado HTTPS sin el intermedio de Sectigo. La app lleva ese
-certificado público (`res/raw/tussam_ca.pem`) para que la verificación sea completa; no se desactiva ninguna comprobación.
-
 ### El recorrido de las líneas en el mapa
 El trazado que se dibuja en el mapa se calcula al compilar (`scripts/recorridos.mjs`) y se guarda en `www/recorridos.js`.
 Para cada línea se usa, por orden:
@@ -233,11 +176,6 @@ y la compilación sigue. Los datos nuevos (y el trazado oficial) también se gua
 
 Además, **el día 1 de cada mes** GitHub mira si TUSSAM ha publicado horarios o recorridos nuevos y, solo si los hay,
 compila una versión nueva por su cuenta.
-
-Si algún día el Ministerio pidiera una clave para descargar, regístrate gratis en nap.transportes.gob.es y guárdala
-en tu repositorio como secreto llamado `NAP_API_KEY` (*Settings → Secrets and variables → Actions*).
-
-Para hacerlo a mano: `python3 scripts/gtfs_a_datos.py <carpeta_gtfs_descomprimida> www/data.js www/data.js`.
 
 ### Servidor propio (opcional)
 En `servidor-saldo/` hay un servidor pequeño (Deno Deploy gratis, o Google Cloud Run) que lee el **saldo** de la tarjeta.
