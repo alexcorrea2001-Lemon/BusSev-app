@@ -56,15 +56,15 @@ jobs:
       - name: Guardar los datos nuevos en el repositorio
         id: datos
         run: |
-          if git diff --quiet -- www/data.js; then
+          if git diff --quiet -- www/data.js geojson/lineas.json; then
             echo "cambio=no" >> "$GITHUB_OUTPUT"
-            echo "Los datos ya estaban al día."
+            echo "Los datos y el trazado ya estaban al día."
           else
             echo "cambio=si" >> "$GITHUB_OUTPUT"
             git config user.name "BusSev (automático)"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add www/data.js
-            git commit -m "Datos oficiales de TUSSAM actualizados"
+            git add www/data.js geojson/lineas.json
+            git commit -m "Datos y trazado oficial de TUSSAM actualizados"
             git push || echo "No se han podido guardar en el repositorio (no pasa nada: van igual en el APK)."
           fi
 
