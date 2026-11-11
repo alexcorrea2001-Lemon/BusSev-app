@@ -79,28 +79,35 @@ export async function recorridosOSM() {
 }
 
 /* Encaja una polilínea con una lista de paradas (en orden): para cada parada, el punto más cercano
-   avanzando hacia delante. Devuelve { idx, coste } (coste = distancia media parada↔trazado, en metros). */
+   avanzando hacia delante. Devuelve { idx, coste(mediana), media, max } de las distancias parada↔trazado (m).
+   Se usa la MEDIANA como coste: así un par de paradas sueltas (una variante que se salta un bucle, una
+   parada mal colocada) no tiran abajo un trazado que por lo demás es el real. */
 export function encajar(pts, stops) {
-  const idx = []; let desde = 0, suma = 0;
+  const idx = [], dists = []; let desde = 0;
   for (const s of stops) {
     let best = desde, bd = Infinity;
     for (let j = desde; j < pts.length; j++) { const dd = hav(s, pts[j]); if (dd < bd) { bd = dd; best = j; } }
-    idx.push(best); desde = best; suma += bd;
+    idx.push(best); dists.push(bd); desde = best;
   }
-  return { idx, coste: suma / Math.max(1, stops.length) };
+  const orden = dists.slice().sort((a, b) => a - b);
+  const mediana = orden.length ? orden[Math.floor(orden.length / 2)] : 0;
+  const media = dists.reduce((a, b) => a + b, 0) / Math.max(1, dists.length);
+  return { idx, coste: mediana, media, max: dists.length ? Math.max(...dists) : 0 };
 }
 
 /* Elige, entre los candidatos de una línea, el que mejor encaja con estas paradas y en su sentido.
-   Devuelve { pts, idx, coste } o null si ninguno encaja bien. */
-export function mejorEncaje(candidatos, stops, maxCoste = 55) {
+   Devuelve { pts, idx, coste } o null si ninguno encaja bien. Umbral generoso: el trazado de OSM es el
+   REAL, y es mejor usarlo aunque las paradas no caigan clavadas que dibujar un rodeo de coche con OSRM. */
+export function mejorEncaje(candidatos, stops, maxCoste = Number(process.env.OSM_MAX_COSTE ?? 80)) {
   let mejor = null;
   for (const c of candidatos) {
     for (const pts of [c.pts, c.pts.slice().reverse()]) {   // se prueba el trazado y su inverso (sentido)
       const e = encajar(pts, stops);
-      if (!mejor || e.coste < mejor.coste) mejor = { pts, idx: e.idx, coste: e.coste, tussam: c.tussam };
+      const peso = e.coste + (c.tussam ? 0 : 8);            // a igualdad, se prefiere la ruta marcada TUSSAM
+      if (!mejor || peso < mejor.peso) mejor = { pts, idx: e.idx, coste: e.coste, max: e.max, peso, tussam: c.tussam };
     }
   }
   if (!mejor) return null;
-  // Entre dos candidatos empatados, se prefiere el marcado como TUSSAM
-  return mejor.coste <= maxCoste ? mejor : null;
+  // Se acepta si la mayoría de paradas están cerca (mediana) y no hay un disparate (relación de otra línea).
+  return (mejor.coste <= maxCoste && mejor.max <= 500) ? mejor : null;
 }

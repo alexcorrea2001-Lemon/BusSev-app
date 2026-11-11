@@ -11,7 +11,8 @@ const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
 const MAX_WAYPOINTS = 80;
 let MAX_AJUSTE = 10;          // el servidor público de OSRM solo encaja trazados de pocas paradas de una vez
-const VERSION_CALCULO = 6;    // 6: trazado real = shapes.txt del GTFS (si hay) → OpenStreetMap → OSRM
+const VERSION_CALCULO = 7;    // 7: emparejamiento OSM más tolerante (mediana) → más líneas con trazado real
+                              //    (6: shapes.txt del GTFS si hay → OpenStreetMap → OSRM)
 const PAUSA_MS = Number(process.env.OSRM_PAUSA_MS ?? 1100); // el servidor público pide como mucho 1 consulta por segundo
 
 const ctx = { window: {} };
