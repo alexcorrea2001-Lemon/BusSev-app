@@ -249,9 +249,12 @@ export async function pegarAOSM(pts, matcher = matchTrozo) {
   const m = [pts[0]];
   for (let i = 1; i < pts.length - 1; i++) if (hav(m[m.length - 1], pts[i]) >= PASO) m.push(pts[i]);
   m.push(pts[pts.length - 1]);
+  // El servidor público de OSRM limita cuántas coordenadas admite por consulta de /match ("Too many trace
+  // coordinates"), así que se trocea pequeño y se solapan los trozos un punto.
+  const TROZO = Math.max(3, Number(process.env.PEGAR_TROZO ?? 40));
   const out = [];
   for (let i = 0; i < m.length - 1;) {
-    const trozo = m.slice(i, i + 95);
+    const trozo = m.slice(i, i + TROZO);
     let snapped = null;
     try { snapped = await matcher(trozo); }
     catch (e) { if (avisoPegar++ < 3) console.log(`  Pegado a la calle (OSM) no disponible: OSRM ${e.message}. Esa(s) línea(s) se quedan con el trazado oficial.`); return null; }
