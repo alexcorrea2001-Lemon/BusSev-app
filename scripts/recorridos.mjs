@@ -7,13 +7,14 @@ import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { recorridosOSM, mejorEncaje } from './recorridos_osm.mjs';
 import { recorridosTussam, encajarOficial, indices } from './recorridos_tussam.mjs';
+import { leerCalles, redDeCalles, pegarACalles } from './pegar_calles.mjs';
 
 const OSRM = process.env.OSRM_URL || 'https://router.project-osrm.org';
 const ROOT = new URL('..', import.meta.url).pathname;
 const MAX_WAYPOINTS = 80;
 let MAX_AJUSTE = 10;          // el servidor público de OSRM solo encaja trazados de pocas paradas de una vez
-const VERSION_CALCULO = 10;   // 10: trazado OFICIAL + "pegado" a las calles de OSM (map-matching de OSRM)
-                              //     (9: trazado OFICIAL de TUSSAM; 8: OSM solo-TUSSAM; 7: mediana; 6: shapes/OSM/OSRM)
+const VERSION_CALCULO = 11;   // 11: trazado OFICIAL ajustado a las calles de OSM con la red guardada en la rama «calles-osm»
+                              //     (10: oficial + OSRM /match; 9: oficial; 8: OSM solo-TUSSAM; 7: mediana; 6: shapes/OSM/OSRM)
 const PAUSA_MS = Number(process.env.OSRM_PAUSA_MS ?? 1100); // el servidor público pide como mucho 1 consulta por segundo
 
 const ctx = { window: {} };
@@ -36,9 +37,21 @@ catch (e) { console.log(`Trazado oficial de TUSSAM no disponible (${e.message}):
 // Firma del trazado oficial (nº de puntos por línea): si cambia, se vuelve a calcular aunque las paradas sigan igual.
 const firmaOficial = [...recOficial.entries()].map(([r, a]) => [r, a.reduce((n, c) => n + c.pts.length, 0)]).sort();
 
+/* Calles reales de OpenStreetMap (rama «calles-osm» del repositorio; las descarga el workflow "Calles OSM").
+   Con ellas se ajusta el trazado oficial a la calzada del mapa, sin depender de ningún servidor al compilar.
+   Si no están, las líneas se quedan con el trazado oficial tal cual. */
+let redCalles = null, fechaCalles = '';
+if (!process.env.BUSSEV_SOLO_FUNCIONES && !process.env.SIN_PEGAR_OSM) {
+  try {
+    const datos = leerCalles(ROOT);
+    redCalles = redDeCalles(datos); fechaCalles = String(datos.fecha || '');
+    console.log(`Calles de OpenStreetMap (${fechaCalles.slice(0, 10)}): ${datos.ways.length} calles; el trazado se ajusta a la calzada.`);
+  } catch (e) { console.log(`Calles de OpenStreetMap no disponibles (${String(e.message).split('\n')[0]}): el trazado se queda como lo publica TUSSAM. Lanza el workflow "Calles OSM" para descargarlas.`); }
+}
+
 /* 0) Si ya se calcularon (y salieron completos) para estos mismos datos, no se repite: compila más rápido
       y no se carga a los servidores públicos de mapas. */
-const FIRMA = crypto.createHash('sha1').update(JSON.stringify([VERSION_CALCULO, D.recorridos, D.paradas.map((p) => [p.codigo, p.latitud, p.longitud]), firmaOficial])).digest('hex').slice(0, 16);
+const FIRMA = crypto.createHash('sha1').update(JSON.stringify([VERSION_CALCULO, D.recorridos, D.paradas.map((p) => [p.codigo, p.latitud, p.longitud]), firmaOficial, fechaCalles])).digest('hex').slice(0, 16);
 if (!process.env.BUSSEV_SOLO_FUNCIONES && !process.env.FORZAR_RECORRIDOS) {
   try {
     const previo = fs.readFileSync(`${ROOT}www/recorridos.js`, 'utf8');
@@ -221,50 +234,6 @@ async function bordeCalle(stops, rapido) {
    calle), la ruta POR CALLE que pasa por ellas (OSRM, recta de respaldo). Así ninguna parada queda suelta
    y nada se dibuja recto por encima de las casas. Si todas las paradas están sobre el trazado oficial,
    devuelve el trazado tal cual (caso de casi todas las líneas). Devuelve { pts, idx }. */
-/* ---- "Pegar" el trazado a las calles reales de OpenStreetMap (map-matching de OSRM) ----
-   El trazado oficial va por el carril del autobús, que a veces cae unos metros al lado del eje de la calle
-   que dibuja el mapa. OSRM /match coloca una traza sobre la red de calles de OSM: así la línea se dibuja
-   JUSTO encima de la carretera del mapa. Si falla o saldría peor, se deja el trazado oficial (nunca peor). */
-async function matchTrozo(pts) {            // pts: [[lat,lon]...] (<=95); devuelve [[lat,lon]...] pegado o null
-  const coords = pts.map((p) => `${p[1].toFixed(6)},${p[0].toFixed(6)}`).join(';');
-  const rad = pts.map(() => 30).join(';');
-  const url = `${OSRM}/match/v1/driving/${coords}?overview=full&geometries=geojson&gaps=ignore&tidy=true&radiuses=${rad}`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'BusSev (app personal)' }, signal: AbortSignal.timeout(15000) });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`HTTP ${res.status}${j.message ? ` ${j.message}` : ''}`);
-  if (j.code !== 'Ok' || !Array.isArray(j.matchings) || !j.matchings.length) throw new Error(`respuesta ${j.code || 'sin matchings'}`);
-  const out = [];
-  for (const mm of j.matchings) for (const c of (mm.geometry?.coordinates || [])) {
-    const q = [c[1], c[0]], l = out[out.length - 1];
-    if (!l || l[0] !== q[0] || l[1] !== q[1]) out.push(q);
-  }
-  return out.length >= 2 ? out : null;
-}
-let avisoPegar = 0;   // para explicar en el log, una vez, por qué no se pega (sin llenarlo de líneas)
-/* Pega un trazado entero: lo submuestrea (OSRM /match admite pocas coordenadas por consulta y no necesita
-   tanto detalle), lo manda por trozos y los une. Si un trozo falla, se descarta todo (se deja el oficial). */
-export async function pegarAOSM(pts, matcher = matchTrozo) {
-  if (!Array.isArray(pts) || pts.length < 2) return null;
-  const PASO = Number(process.env.PEGAR_PASO_M ?? 60);
-  const m = [pts[0]];
-  for (let i = 1; i < pts.length - 1; i++) if (hav(m[m.length - 1], pts[i]) >= PASO) m.push(pts[i]);
-  m.push(pts[pts.length - 1]);
-  // El servidor público de OSRM limita cuántas coordenadas admite por consulta de /match ("Too many trace
-  // coordinates"), así que se trocea pequeño y se solapan los trozos un punto.
-  const TROZO = Math.max(3, Number(process.env.PEGAR_TROZO ?? 40));
-  const out = [];
-  for (let i = 0; i < m.length - 1;) {
-    const trozo = m.slice(i, i + TROZO);
-    let snapped = null;
-    try { snapped = await matcher(trozo); }
-    catch (e) { if (avisoPegar++ < 3) console.log(`  Pegado a la calle (OSM) no disponible: OSRM ${e.message}. Esa(s) línea(s) se quedan con el trazado oficial.`); return null; }
-    if (!snapped) return null;
-    for (const q of snapped) { const l = out[out.length - 1]; if (!l || l[0] !== q[0] || l[1] !== q[1]) out.push(q); }
-    i += trozo.length - 1;
-    await esperar(PAUSA_MS);
-  }
-  return out.length >= 2 ? out : null;
-}
 /* Red de seguridad: el trazado pegado solo se acepta si no se aparta mucho del oficial (map-matching correcto)
    ni se alarga de forma rara (evita que OSRM se vaya por calles que no son). Si no, se queda el oficial. */
 export function pegadoAceptable(oficial, pegado, maxMediana = Number(process.env.PEGAR_MAX_MEDIANA ?? 35)) {
@@ -378,15 +347,14 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
       // calles (OSRM, recta de respaldo). Así ninguna parada queda suelta.
       const rapido = !quedaTiempo(LIMITE_COMPLETO);
       const r = await montarOficial(m, stops.map((s) => [s.lat, s.lon]), rapido);
-      // "Pegado" del trazado a las calles de OpenStreetMap (map-matching de OSRM): APAGADO por defecto. El
-      // trazado oficial ya va sobre la calzada (las paradas de OSM quedan a ~5 m de él, de mediana); lo que se
-      // veía "al lado de la carretera" era el desplazamiento por carriles del mapa (arreglado en app.js). El
-      // pegado dependía de un servidor público y podía meter rodeos, así que solo se hace si se pide con
-      // PEGAR_OSM=1 (con su red de seguridad: si falla o saldría peor, se queda el oficial).
+      // Se ajusta el trazado a las calles reales de OpenStreetMap: queda encima de la calzada del mapa y da la
+      // vuelta a las rotondas. Red de seguridad: si el resultado se aparta del oficial o cambia mucho de largo,
+      // se queda el oficial (nunca peor).
       let lineaPts = r.pts, pegada = false;
-      if (process.env.PEGAR_OSM && !rapido && quedaTiempo(LIMITE_TOTAL)) {
-        const pegado = await pegarAOSM(r.pts).catch(() => null);
-        if (pegadoAceptable(r.pts, pegado)) { lineaPts = pegado; pegada = true; }
+      if (redCalles) {
+        let aj = null;
+        try { aj = pegarACalles(redCalles, r.pts); } catch { /* se queda el oficial */ }
+        if (aj && aj.pegado >= 0.5 && pegadoAceptable(r.pts, aj.pts)) { lineaPts = aj.pts; pegada = true; }
       }
       const idx = pegada ? indices(lineaPts, stops.map((s) => [s.lat, s.lon])) : r.idx;
       const pts = lineaPts.map(([la, lo]) => [Math.round(la * 1e5) / 1e5, Math.round(lo * 1e5) / 1e5]);
@@ -394,7 +362,7 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
       for (const [lat, lon] of pts) { const L = Math.round(lat * 1e5), N = Math.round(lon * 1e5); d.push(L - pl, N - pn); pl = L; pn = N; }
       salida[k] = { d, s: idx };
       ok++; oficialUsados++; if (pegada) pegadosOSM++;
-      process.stdout.write(`✓ ${k} (trazado oficial de TUSSAM, ${stops.length} paradas, ±${Math.round(m.coste)} m${pegada ? ', pegado a la calle (OSM)' : ''}${r.rerutadas ? `, ${r.rerutadas} por calle` : ''})\n`);
+      process.stdout.write(`✓ ${k} (trazado oficial de TUSSAM, ${stops.length} paradas, ±${Math.round(m.coste)} m${pegada ? ', ajustado a la calle' : ''}${r.rerutadas ? `, ${r.rerutadas} por calle` : ''})\n`);
       continue;
     }
   }
@@ -491,4 +459,4 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) fs.writeFileSync(`${ROOT}www/recorridos.
   `/* Paradas colocadas sobre la calle por la que pasa el autobús (las de TUSSAM a veces caen dentro de una manzana) */\nwindow.BUSSEV_PARADAS_AJUSTADAS=${JSON.stringify(Object.fromEntries([...[...ajustes].map(([c, a]) => [c, a.pos.map((v) => Math.round(v * 1e6) / 1e6)]), ...osm]))};\n` +
   `/* Posición de las paradas según OpenStreetMap (© colaboradores de OpenStreetMap, ODbL); se reutiliza si un día no contesta */\nwindow.BUSSEV_PARADAS_OSM=${JSON.stringify(Object.fromEntries(osm))};\n` +
   `window.BUSSEV_RECORRIDOS_FIRMA="${FIRMA}";window.BUSSEV_RECORRIDOS_COMPLETO=${!rapidas && !sinCalcular && !fallidas && osm.size > 0 && !osmReutilizado};\n`);
-if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido (${oficialUsados} del trazado oficial de TUSSAM, ${pegadosOSM} pegadas a la calle con OSM, ${shapesUsados} del GTFS, ${osmUsados} de OpenStreetMap, el resto por OSRM), ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle; ${rapidas} líneas en modo rápido, ${sinCalcular} sin calcular.`);
+if (!process.env.BUSSEV_SOLO_FUNCIONES) console.log(`Recorridos: ${ok}/${grupos.size} líneas-sentido (${oficialUsados} del trazado oficial de TUSSAM, ${pegadosOSM} ajustadas a la calle (OSM), ${shapesUsados} del GTFS, ${osmUsados} de OpenStreetMap, el resto por OSRM), ${rehechos} recálculos de tramos raros (${rarosQuedan} siguen algo raros, pero por calle), ${rectos} en recta (sin camino); paradas: ${osm.size} con OpenStreetMap y ${ajustes.size} pegadas a la calle; ${rapidas} líneas en modo rápido, ${sinCalcular} sin calcular.`);
