@@ -20,7 +20,7 @@ permissions:
 jobs:
   calles:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +29,7 @@ jobs:
           node-version: 20
 
       - name: Descargar las calles
+        id: bajar
         run: |
           cat > "$RUNNER_TEMP/calles.mjs" <<'FIN_SCRIPT'
           import fs from 'node:fs';
@@ -46,28 +47,52 @@ jobs:
           const mira = (c) => { if (typeof c[0] === 'number') { if (c[1] < s) s = c[1]; if (c[1] > n) n = c[1]; if (c[0] < o) o = c[0]; if (c[0] > e) e = c[0]; } else c.forEach(mira); };
           for (const f of geo.features || []) if (f.geometry) mira(f.geometry.coordinates);
           const M = 0.004;
-          const bbox = [s - M, o - M * 1.25, n + M, e + M * 1.25].map((v) => v.toFixed(5)).join(',');
-          console.log(`Zona: ${bbox}`);
+          s -= M; n += M; o -= M * 1.25; e += M * 1.25;
+          console.log(`Zona: ${[s, o, n, e].map((v) => v.toFixed(5)).join(',')}`);
+          const bbox = [s, o, n, e].map((v) => v.toFixed(5)).join(',');
           const TIPOS = 'motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|busway|pedestrian|road|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link';
-          const q = `[out:json][timeout:170][maxsize:1073741824];way["highway"~"^(${TIPOS})$"](${bbox});out geom qt;`;
           const ETIQ = ['highway', 'oneway', 'junction', 'access', 'bus', 'psv', 'motor_vehicle', 'vehicle', 'service', 'oneway:bus', 'oneway:psv', 'busway', 'lanes:bus', 'lanes:psv', 'name', 'layer', 'bridge', 'tunnel', 'area'];
-          let ways = null;
-          for (let vuelta = 0; vuelta < 3 && !ways; vuelta++) for (const url of SERVIDORES) {
-            try {
-              const t0 = Date.now();
-              const r = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: q }), headers: { 'User-Agent': 'BusSev (app personal, no comercial)' }, signal: AbortSignal.timeout(240000) });
-              if (!r.ok) throw new Error(`HTTP ${r.status}`);
-              const j = await r.json();
-              if (!Array.isArray(j.elements) || j.elements.length < 1000) throw new Error(`respuesta rara (${j.elements?.length} elementos${j.remark ? `; ${j.remark}` : ''})`);
-              ways = j.elements.filter((w) => w.type === 'way' && Array.isArray(w.geometry) && w.geometry.length >= 2);
-              console.log(`${new URL(url).hostname}: ${ways.length} calles en ${Math.round((Date.now() - t0) / 1000)} s`);
-              break;
-            } catch (err) {
-              console.log(`${new URL(url).hostname}: ${err.message}; se prueba otro servidor`);
-              await new Promise((ok) => setTimeout(ok, 8000));
+          // Los servidores públicos de OpenStreetMap se saturan a ratos. Para que conteste alguno, la zona se pide
+          // en 4 trozos pequeños (consultas ligeras), cada trozo se reintenta en todos los servidores con pausas
+          // cada vez más largas, y se recuerda qué servidor va bien para empezar por él.
+          const LIMITE = Date.now() + Number(process.env.CALLES_LIMITE_MIN || 17) * 60000;
+          const PAUSA = Number(process.env.CALLES_PAUSA_MS || 10000);
+          const mLat = (s + n) / 2, mLon = (o + e) / 2;
+          const trozos = [[s, o, mLat, mLon], [s, mLon, mLat, e], [mLat, o, n, mLon], [mLat, mLon, n, e]];
+          const porId = new Map();
+          let completo = true;
+          for (const [i, t] of trozos.entries()) {
+            const zona = t.map((v) => v.toFixed(5)).join(',');
+            const q = `[out:json][timeout:90];way["highway"~"^(${TIPOS})$"](${zona});out geom qt;`;
+            let hecho = false;
+            for (let vuelta = 0; vuelta < 5 && !hecho && Date.now() < LIMITE; vuelta++) for (const url of [...SERVIDORES]) {
+              if (Date.now() >= LIMITE) break;
+              try {
+                const t0 = Date.now();
+                const r = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: q }), headers: { 'User-Agent': 'BusSev (app personal, no comercial)' }, signal: AbortSignal.timeout(120000) });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const j = await r.json();
+                // Si el servidor corta la consulta a medias, lo dice en "remark": esa respuesta no vale
+                if (!Array.isArray(j.elements) || j.remark) throw new Error(`respuesta incompleta${j.remark ? ` (${String(j.remark).slice(0, 80)})` : ''}`);
+                let nuevas = 0;
+                for (const w of j.elements) if (w.type === 'way' && Array.isArray(w.geometry) && w.geometry.length >= 2 && !porId.has(w.id)) { porId.set(w.id, w); nuevas++; }
+                console.log(`Trozo ${i + 1}/4 · ${new URL(url).hostname}: ${j.elements.length} calles (${nuevas} nuevas) en ${Math.round((Date.now() - t0) / 1000)} s`);
+                SERVIDORES.splice(SERVIDORES.indexOf(url), 1); SERVIDORES.unshift(url);   // el que funciona, primero
+                hecho = true; break;
+              } catch (err) {
+                console.log(`Trozo ${i + 1}/4 · ${new URL(url).hostname}: ${err.message}; se prueba otro servidor`);
+                await new Promise((ok) => setTimeout(ok, PAUSA * (vuelta + 1)));
+              }
             }
+            if (!hecho) { completo = false; break; }
           }
-          if (!ways) { console.log('::error::Ningún servidor de OpenStreetMap ha contestado. Vuelve a lanzar "Calles OSM" dentro de un rato.'); process.exit(1); }
+          const ways = [...porId.values()];
+          if (!completo || ways.length < 1000) {
+            // No pasa nada: se siguen usando las calles guardadas la vez anterior (si las hay).
+            fs.writeFileSync(process.env.GITHUB_OUTPUT || '/dev/null', 'descargadas=no\n', { flag: 'a' });
+            console.log('::warning::Los servidores de OpenStreetMap no han contestado ahora. Se siguen usando las calles guardadas la vez anterior; no hace falta hacer nada (se volverá a intentar el mes que viene, o lanza "Calles OSM" a mano otro día).');
+            process.exit(0);
+          }
           // Formato compacto: por calle, sus etiquetas útiles, su id, los ids de sus nodos y las coordenadas (1e-7 grados, en diferencias)
           const out = ways.map((w) => {
             const t = {}; for (const k of ETIQ) if (w.tags && w.tags[k] != null) t[k] = w.tags[k];
@@ -77,11 +102,13 @@ jobs:
           });
           const gz = zlib.gzipSync(JSON.stringify({ fecha: new Date().toISOString(), bbox, ways: out }), { level: 9 });
           fs.writeFileSync(SALIDA, gz);
+          fs.writeFileSync(process.env.GITHUB_OUTPUT || '/dev/null', 'descargadas=si\n', { flag: 'a' });
           console.log(`Guardado: ${out.length} calles, ${(gz.length / 1048576).toFixed(1)} MB`);
           FIN_SCRIPT
           node "$RUNNER_TEMP/calles.mjs" "$RUNNER_TEMP/calles.json.gz"
 
       - name: Guardar en la rama calles-osm
+        if: steps.bajar.outputs.descargadas == 'si'
         run: |
           mkdir "$RUNNER_TEMP/rama" && cd "$RUNNER_TEMP/rama"
           git init -q -b calles-osm
