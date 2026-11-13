@@ -1,10 +1,15 @@
 # Descarga las calles de OpenStreetMap de la zona por donde pasan las líneas y las guarda en la rama
 # «calles-osm» del repositorio. Sirve para ajustar el trazado de las líneas a la calzada (rotondas incluidas).
-# Se lanza solo al subir este archivo, o a mano: Actions → "Calles OSM" → Run workflow.
+# Se lanza solo el día 1 de cada mes (un rato antes de la revisión mensual de "Compilar APK"), al subir este
+# archivo, o a mano: Actions → "Calles OSM" → Run workflow.
+# Además deja apuntada la fecha en geojson/calles_osm.txt: ese pequeño cambio mensual cuenta como actividad
+# del repositorio, y así GitHub no desactiva las tareas programadas (lo hace tras 60 días sin actividad).
 name: Calles OSM
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "40 3 1 * *"
   push:
     branches: [main, master]
     paths: [".github/workflows/calles.yml"]
@@ -87,3 +92,17 @@ jobs:
           git commit -q -m "Calles de OpenStreetMap (© colaboradores de OpenStreetMap, ODbL)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" calles-osm
           echo "Calles guardadas en la rama calles-osm."
+
+      # Se ejecuta siempre (aunque los servidores de mapas hayan fallado): mantiene activo el repositorio.
+      # Este cambio lo hace GitHub mismo, así que NO lanza otra compilación del APK.
+      - name: Apuntar la fecha (mantiene activa la revisión mensual)
+        if: always()
+        run: |
+          printf 'Última ejecución de "Calles OSM": %s\nLas calles de OpenStreetMap están en la rama calles-osm (© colaboradores de OpenStreetMap, ODbL).\n' "$(date -u +%Y-%m-%d)" > geojson/calles_osm.txt
+          git config user.name "BusSev (automático)"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add geojson/calles_osm.txt
+          if git diff --cached --quiet; then echo "Ya estaba apuntada la fecha de hoy."; exit 0; fi
+          git commit -q -m "Calles OSM: revisión del $(date -u +%Y-%m-%d)"
+          git pull -q --rebase || true
+          git push || echo "No se ha podido apuntar la fecha (no pasa nada)."
