@@ -276,7 +276,6 @@ main { position: relative; overflow: hidden; min-height: 0; }
 .nfc-scan i:nth-child(4) { animation-delay: 1.2s; }
 @keyframes nfc-ripple { 0% { transform: scale(.55); opacity: .55; } 100% { transform: scale(2.2); opacity: 0; } }
 :root.a-quieto .nfc-scan i { display: none; animation: none; }
-@media (prefers-reduced-motion: reduce) { .pulse, .icon-btn.spinning svg { animation: none; } .switch, .switch::after { transition: none; } }
 
 /* ---------- MapLibre ---------- */
 .maplibregl-map { font-family: var(--font-body); }
@@ -394,7 +393,7 @@ details > summary { cursor: pointer; list-style: none; }
 details > summary::-webkit-details-marker { display: none; }
 details.set-group > summary::after { content: "›"; float: right; transform: rotate(90deg); color: var(--muted); font-size: 20px; line-height: 1; }
 details.set-group[open] > summary::after { transform: rotate(-90deg); }
-@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } .btn:active { transform: none; } }
+.a-quieto .btn:active { transform: none; }
 
 /* hoja del mapa plegable */
 .sheet.collapsed .chips-wrap, .sheet.collapsed #sh-board, .sheet.collapsed .sheet-actions { visibility: hidden; }
@@ -891,3 +890,11 @@ html.mapa-tab-completo #btn-mapfull { background: var(--accent); color: var(--on
 .a-botones #btn-mapfull { top: 204px; }
 /* Repintado forzado al volver de otra app */
 html.repinta body { transform: translateZ(0); }
+
+/* Botón «Buscar actualización»: icono dibujado (dos flechas en círculo) dentro de un redondel suave, que gira
+   mientras está buscando. */
+.btn-upd { gap: 10px; }
+.btn-upd .ico-upd { width: 30px; height: 30px; padding: 5px; box-sizing: border-box; border-radius: 50%; background: rgb(255 255 255 / .22); flex: none; }
+.btn-upd.buscando .ico-upd { animation: upd-gira .9s linear infinite; }
+.btn-upd:disabled { opacity: .8; }
+@keyframes upd-gira { to { transform: rotate(360deg); } }

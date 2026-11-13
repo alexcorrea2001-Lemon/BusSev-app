@@ -156,7 +156,11 @@ const busIco = () => `<img class="lg-busimg" src="${busImg()}" alt="autobús" st
 const TAGS = ['#e5303c', '#f08c00', '#f2c400', '#2fb36d', '#1fa3c9', '#3d6bff', '#8a5cf6', '#e0479e', '#7a7f8a'];
 
 const darkMQ = matchMedia('(prefers-color-scheme: dark)');
-const reduceMQ = matchMedia('(prefers-reduced-motion: reduce)');
+/* ¿Sin animaciones? Lo decide SOLO el interruptor «Reducir animaciones» de Ajustes (o el Modo sencillo).
+   Antes también se apagaban solas, sin avisar, si el móvil tenía quitadas las animaciones del sistema (pasa
+   con el ahorro de batería de algunas marcas o en Accesibilidad): en ese móvil la app salía «muerta» aunque el
+   interruptor estuviera apagado, y no había forma de encenderlas. */
+const quieto = () => !!settings.menosAnimaciones;
 let resolvedTheme = 'dark';
 function applyTheme() {
   resolvedTheme = settings.theme === 'auto' ? (darkMQ.matches ? 'dark' : 'light') : settings.theme;
@@ -177,7 +181,7 @@ function applyTheme() {
   root.classList.toggle('a-letra', !!settings.letraGrande);
   root.style.setProperty('--escala-texto', settings.escalaTexto || 1.22);
   root.classList.toggle('a-contraste', !!settings.altoContraste);
-  root.classList.toggle('a-quieto', !!settings.menosAnimaciones || reduceMQ.matches);
+  root.classList.toggle('a-quieto', quieto());
   root.classList.toggle('a-botones', !!settings.botonesGrandes);
   root.classList.toggle('a-sencillo', !!settings.modoSencillo);
   const v = vehiculoFiesta();
@@ -203,8 +207,7 @@ const FIESTA = {
 function fiesta(tem) {
   let capa = document.getElementById('fiesta');
   const f = FIESTA[tem];
-  const quieto = settings.menosAnimaciones || reduceMQ.matches;
-  if (!f || quieto) { capa?.remove(); return; }
+  if (!f || quieto()) { capa?.remove(); return; }
   if (capa?.dataset.t === tem) return;
   capa?.remove();
   capa = document.createElement('div');
@@ -231,7 +234,7 @@ function saludoFiestaHTML() {
   return `<div class="saludo-fiesta"><b>${f.saludo}</b><span>${f.sub}</span>${especial ? `<a class="sf-btn" href="#avisos">${busIco()} Ver servicios especiales de ${tem === 'feria' ? 'Feria' : 'Semana Santa'}</a>` : ''}</div>`;
 }
 darkMQ.addEventListener?.('change', () => { if (settings.theme === 'auto') applyTheme(); });
-const animMs = (ms) => (settings.menosAnimaciones || reduceMQ.matches ? 0 : ms);
+const animMs = (ms) => (quieto() ? 0 : ms);
 const vibrar = (ms) => { if (settings.vibrar) navigator.vibrate?.(ms); };
 /* Cambia el contenido solo si ha cambiado (evita parpadeos y trabajo de más) */
 function setHTML(el, html) { if (el && el.__h !== html) { el.innerHTML = html; el.__h = html; } }
@@ -307,6 +310,7 @@ const ICON = {
   bus: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 11h16M8 21v-3M16 21v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="8" cy="14.5" r="1.1" fill="currentColor"/><circle cx="16" cy="14.5" r="1.1" fill="currentColor"/></svg>',
   off: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8.5a15 15 0 0 1 20 0M5.5 12a10 10 0 0 1 13 0M9 15.5a5 5 0 0 1 6 0M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="19" r="1.3" fill="currentColor"/></svg>',
   nfc: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 7.5a6.5 6.5 0 0 1 0 9M9.8 5a10 10 0 0 1 0 14M13 2.8a13 13 0 0 1 0 18.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="15.5" y="6" width="6" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+  actualizar: '<svg class="ico-upd" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.8 13.4A8 8 0 0 1 5.6 16.8M4.2 10.6A8 8 0 0 1 18.4 7.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M18.9 3v4.4h-4.4M5.1 21v-4.4h4.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   route: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 6H15a3.5 3.5 0 0 1 0 7H9a3.5 3.5 0 0 0 0 7h6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4ZM13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
@@ -1355,7 +1359,7 @@ function offlineHTML() {
 views.favoritas = (el) => {
   let stop = null, loading = false, results = null, dead = false;
   // Últimos tiempos guardados (< 10 min) para enseñarlos al instante al abrir, en vez de «Cargando…»
-  const recientes = (codigo) => { const u = window.BusSevBackend?.ultimo?.(codigo); if (!u || !u.cached_at) return null; return (navigator.onLine === false || Date.now() - Date.parse(u.cached_at) < 600000) ? u : null; };
+  const recientes = (codigo) => tiemposGuardados(codigo, 600000);
   function paint() {
     const list = favs.list();
     if (!list.length) {
@@ -1859,6 +1863,13 @@ views.linea = (el, numero) => {
 };
 
 /* ---------- Detalle de parada ---------- */
+/* Últimos tiempos que se vieron de una parada, si son de hace poco (o si no hay conexión): para enseñar
+   algo al momento mientras llega la respuesta nueva de TUSSAM. */
+function tiemposGuardados(codigo, maxMs) {
+  const u = window.BusSevBackend?.ultimo?.(codigo);
+  if (!u || !u.cached_at) return null;
+  return (navigator.onLine === false || Date.now() - Date.parse(u.cached_at) < maxMs) ? u : null;
+}
 /* Líneas elegidas en una parada: si es favorita, las de la favorita (se comparten con Favoritas) */
 const lineasParada = {
   get(c) { const f = favs.get(c); return f ? (f.lineas || []) : (store.get('paradaLineas', {})[c] || []); },
@@ -1923,15 +1934,19 @@ views.parada = (el, codigo) => {
     paintTools();
     active.rerender = () => { paintTools(); load(true); };
     $('#p-full', el).onclick = () => pantallaCompleta(!completo);
-    if (info.latitud && info.longitud) {
+    // El mapa es lo que más le cuesta al móvil y queda debajo de los tiempos: se monta DESPUÉS de pedirlos y
+    // pintarlos (o al cabo de 1,2 s si TUSSAM tarda), para que los minutos salgan cuanto antes.
+    const montarMapa = () => {
+      if (dead || bm || !$('#p-map', el)) return;
       bm = createMap($('#p-map', el), [info.latitud, info.longitud], 16);
-      if (bm) {
-        markers = new MarkerSet(bm);
-        addStopDots(bm, (p) => { if (p.codigo !== codigo) location.hash = `parada-${p.codigo}`; });
-        addRouteLayers(bm);
-        marker(bm, [info.latitud, info.longitud], stopPinEl(), `<b>${esc(info.nombre)}</b>`);
-      }
-    } else $('#p-map', el).parentElement.hidden = true;
+      if (!bm) return;
+      markers = new MarkerSet(bm);
+      addStopDots(bm, (p) => { if (p.codigo !== codigo) location.hash = `parada-${p.codigo}`; });
+      addRouteLayers(bm);
+      marker(bm, [info.latitud, info.longitud], stopPinEl(), `<b>${esc(info.nombre)}</b>`);
+      if (ultimo) pintar(ultimo, true);   // los autobuses de los tiempos que ya se tienen
+    };
+    if (!(info.latitud && info.longitud)) $('#p-map', el).parentElement.hidden = true;
     Promise.all([api(`/paradas/${encodeURIComponent(codigo)}/lineas`), getLineas().catch(() => null)]).then(([nums]) => {
       if (dead) return;
       nums = [...nums].sort(ordenLineas);
@@ -1940,7 +1955,13 @@ views.parada = (el, codigo) => {
       lineasAqui = nums.map((n) => lineaFor(n)?.numero || String(n));
       pintarFiltro();
     }).catch(() => { if (!dead) $('#p-lineas', el).innerHTML = '<span class="muted small">No se han podido cargar.</span>'; });
-    await load();
+    // Si se acaban de ver los tiempos de esta parada (p. ej. vienes de Favoritas), se enseñan al momento
+    // mientras llegan los nuevos, en vez de un «Cargando…».
+    const previo = tiemposGuardados(codigo, 120000);
+    if (previo) { previo.__at = new Date(previo.cached_at); ultimo = previo; pintarFiltro(); pintar(previo, true); }
+    const cargado = load();
+    if (info.latitud && info.longitud) Promise.race([cargado, new Promise((ok) => setTimeout(ok, 1200))]).then(montarMapa);
+    await cargado;
     stop = autoRefresh(() => load(true));
   }
   /* Chips para elegir qué líneas ver en esta parada */
@@ -2003,7 +2024,7 @@ views.parada = (el, codigo) => {
       if (dead) return;
       // TUSSAM pide esperar: se reintenta solo en cuanto deje (sin que tengas que tocar nada)
       if (e.status === 429) { clearTimeout(reintento); reintento = setTimeout(() => { if (!dead) load(true); }, Math.max(4000, window.BusSevBackend.pausa + 500)); }
-      if (!quiet || !ultimo) $('#p-board', el).innerHTML = e.status === 429 ? cargandoHTML('TUSSAM va saturado', 'Lo intentamos de nuevo en unos segundos…') : `<div class="board-empty">${esc(e.message)}</div>`;
+      if (!ultimo) $('#p-board', el).innerHTML = e.status === 429 ? cargandoHTML('TUSSAM va saturado', 'Lo intentamos de nuevo en unos segundos…') : `<div class="board-empty">${esc(e.message)}</div>`;
       else if (e.status !== 429) toast(e.message);
     } finally { spin(false); }
   }
@@ -2138,7 +2159,7 @@ views.ajustes = (el) => {
         <div class="ver-fila"><div><h3>BusSev ${esc(actualizaciones.nombre())}</h3>
           <p>${actualizaciones.version().fecha ? `Compilada el ${new Date(actualizaciones.version().fecha + 'T12:00').toLocaleDateString('es-ES')}. ` : ''}Paradas y recorridos oficiales de TUSSAM${dc ? `, válidos hasta el <b>${dc.toLocaleDateString('es-ES')}</b>` : ''}.</p></div></div>
         <div id="s-ver-res"></div>
-        <button class="btn block" type="button" id="s-ver">🔄 Buscar actualización</button>
+        <button class="btn block btn-upd" type="button" id="s-ver">${ICON.actualizar}<span>Buscar actualización</span></button>
         <p>Cada versión nueva lleva ya los horarios y recorridos oficiales más recientes (GitHub los descarga solo del Punto de Acceso Nacional de Transportes, y el día 1 de cada mes revisa si TUSSAM ha publicado otros). Se instala encima, sin perder nada.</p>
         ${sw('avisarVersion', settings.avisarVersion, 'Avisarme si hay una versión nueva', 'Lo mira al abrir la app y cada vez que vuelves a ella.')}
       </div>
@@ -2173,7 +2194,7 @@ views.ajustes = (el) => {
     }; });
     $('#s-ver', el).onclick = async () => {
       const box = $('#s-ver-res', el), b = $('#s-ver', el);
-      b.disabled = true;
+      b.disabled = true; b.classList.add('buscando');
       box.innerHTML = cargandoHTML('Buscando versiones nuevas…');
       try {
         const r = await actualizaciones.buscar();
@@ -2189,7 +2210,7 @@ views.ajustes = (el) => {
         }
       } catch (e) {
         box.innerHTML = `<div class="ver-res"><b>No se ha podido comprobar</b><span>${esc(e.name === 'AbortError' ? 'GitHub está tardando demasiado.' : (e.message || 'Revisa la conexión.'))}</span></div>`;
-      } finally { b.disabled = false; }
+      } finally { b.disabled = false; b.classList.remove('buscando'); }
     };
     $('#s-saldo-save', el).onclick = () => {
       const v = $('#s-saldo-url', el).value.trim().replace(/\/+$/, '');
