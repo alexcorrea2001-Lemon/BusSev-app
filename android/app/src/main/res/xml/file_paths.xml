@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Solo se puede compartir con otras apps lo que BusSev deja en su carpeta temporal (la copia de seguridad
+     al pulsar «Guardar copia»). Antes estaba abierta también toda la memoria compartida del móvil, que la app
+     no usa para nada. -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="my_images" path="." />
     <cache-path name="my_cache_images" path="." />
 </paths>

@@ -364,16 +364,30 @@
 
   /* Últimos tiempos buenos guardados en el móvil (10 min): si al abrir la app TUSSAM corta,
      se enseñan al momento (marcados como «no actualizados») en vez de «Cargando…» */
-  function guardarUltimo(codigo, data) {
-    try {
-      const m = JSON.parse(localStorage.getItem('bussev.ultimos') || '{}');
-      m[codigo] = { at: Date.now(), data };
-      const ks = Object.keys(m).sort((a, b) => m[b].at - m[a].at);
-      for (const k of ks.slice(30)) delete m[k];
-      localStorage.setItem('bussev.ultimos', JSON.stringify(m));
-    } catch { /* sin espacio */ }
+  /* Se tienen en memoria y se escriben en el móvil de vez en cuando (y al salir de la app), no en cada
+     respuesta: antes, cada tiempo recibido releía y reescribía la lista entera (y cada tarjeta de Favoritas
+     la releía al pintarse), lo que daba tirones al buscar los autobuses de una línea. */
+  let ultimos = null, ultimosT = 0;
+  const cargarUltimos = () => {
+    if (!ultimos) { try { ultimos = JSON.parse(localStorage.getItem('bussev.ultimos') || '{}'); } catch { /* dañado */ } if (!ultimos || typeof ultimos !== 'object') ultimos = {}; }
+    return ultimos;
+  };
+  function volcarUltimos() {
+    clearTimeout(ultimosT); ultimosT = 0;
+    if (ultimos) { try { localStorage.setItem('bussev.ultimos', JSON.stringify(ultimos)); } catch { /* sin espacio */ } }
   }
-  function leerUltimo(codigo) { try { return JSON.parse(localStorage.getItem('bussev.ultimos') || '{}')[codigo] || null; } catch { return null; } }
+  function guardarUltimo(codigo, data) {
+    const m = cargarUltimos();
+    m[codigo] = { at: Date.now(), data };
+    const ks = Object.keys(m);
+    if (ks.length > 30) for (const k of ks.sort((x, y) => m[y].at - m[x].at).slice(30)) delete m[k];
+    if (!ultimosT) ultimosT = setTimeout(volcarUltimos, 2000);
+  }
+  function leerUltimo(codigo) { return cargarUltimos()[codigo] || null; }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible' && ultimosT) volcarUltimos(); });
+    document.addEventListener('pause', () => { if (ultimosT) volcarUltimos(); });
+  }
 
   /* prioridad: 'alta' (lo que estás mirando) o 'baja' (buscar autobuses por la línea) */
   async function tiempos(codigo, prioridad = 'alta', maxEdad = CACHE_MS) {

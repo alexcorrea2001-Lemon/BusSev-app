@@ -274,6 +274,8 @@ function toast(msg) {
 }
 const isNative = () => !!window.Capacitor?.isNativePlatform?.();
 function openWeb(url) {
+  // Por seguridad solo se abren páginas web cifradas (https): nunca otro tipo de enlace, venga de donde venga.
+  try { if (new URL(String(url)).protocol !== 'https:') return; } catch { return; }
   // Dentro de la app (pestaña del navegador encima de BusSev); si no se puede, en el navegador.
   if (window.Capacitor?.isPluginAvailable?.('Browser')) {
     window.Capacitor.nativePromise('Browser', 'open', { url, toolbarColor: '#1c1d21' }).catch(() => { location.href = url; });
@@ -904,9 +906,11 @@ function addRouteLayers(bm) {
   // Desplazamiento lateral (carril) que pone tramosConCarril SOLO donde varias líneas comparten calle: ahí se
   // dibujan pegadas una a otra, centradas sobre la calzada. Donde una línea va sola, carril 0 (encima de la calle).
   const offsetPaths = ['interpolate', ['linear'], ['zoom'], 12, ['*', ['coalesce', ['get', 'carril'], 0], 3], 16, ['*', ['coalesce', ['get', 'carril'], 0], 6]];
+  // Grosor: el normal, o más fino (propiedad «ancho») donde se juntan muchas líneas, para que quepan todas.
+  const anchoPaths = ['coalesce', ['get', 'ancho'], 1];
   // Borde oscuro debajo de cada camino: así dos líneas de color parecido (p. ej. dos azules) se separan.
-  bm.layer({ id: 'bs-paths-casing', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': mapIsDark() ? '#0b0c0f' : '#ffffff', 'line-opacity': 0.9, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4.4, 16, 7.5], 'line-offset': offsetPaths } });
-  bm.layer({ id: 'bs-paths', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.6, 16, 5], 'line-opacity': 0.98, 'line-offset': offsetPaths } });
+  bm.layer({ id: 'bs-paths-casing', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': mapIsDark() ? '#0b0c0f' : '#ffffff', 'line-opacity': 0.9, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, ['+', ['*', anchoPaths, 2.6], 1.8], 16, ['+', ['*', anchoPaths, 5], 2.5]], 'line-offset': offsetPaths } });
+  bm.layer({ id: 'bs-paths', type: 'line', source: 'bs-paths', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, ['*', anchoPaths, 2.6], 16, ['*', anchoPaths, 5]], 'line-opacity': 0.98, 'line-offset': offsetPaths } });
 }
 /* Marcadores HTML (autobuses y parada) */
 function busEl(label, color, clave) {
@@ -1205,12 +1209,13 @@ function lineController(bm, markers, { onStatus, onBuses } = {}) {
    de verdad coinciden varias líneas (misma calle y mismo sentido). Donde una línea va sola, su camino va
    centrado, justo encima de la calle. Antes cada línea llevaba el mismo desplazamiento en todo su camino,
    también donde iba sola, y por eso se veía dibujada al lado de la carretera.
-   caminos: [{ linea, path:[[lat,lon]…] }]  ->  [{ i, pts, carril }]  (i = posición en «caminos») */
+   caminos: [{ linea, color, path:[[lat,lon]…] }]  ->  [{ i, pts, carril }]  (i = posición en «caminos») */
 function tramosConCarril(caminos) {
   const PASO = 10, CERCA = 16, CELDA = 20, MIN_TRAMO = 60, ANG = 40 * Math.PI / 180;
   // Orden fijo de las líneas (no según qué bus llega antes): así no cambian de lado al refrescar.
   const lineas = [...new Set(caminos.map((c) => String(c.linea)))].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
-  if (lineas.length < 2) return caminos.map((c, i) => ({ i, pts: c.path, carril: 0 }));
+  if (lineas.length < 2) return caminos.map((c, i) => ({ i, pts: c.path, carril: 0, ancho: 1 }));
+  const colorDe = lineas.map((l) => String(caminos.find((c) => String(c.linea) === l).color ?? l));
   const lat0 = caminos[0].path[0][0], kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540;
   // Cada camino, en puntos cada ~10 m con su rumbo
   const denso = (path) => {
@@ -1255,15 +1260,25 @@ function tramosConCarril(caminos) {
   const salida = [];
   caminos.forEach((c, i) => {
     const pts = D[i];
-    if (pts.length < 2) { salida.push({ i, pts: c.path, carril: 0 }); return; }
+    if (pts.length < 2) { salida.push({ i, pts: c.path, carril: 0, ancho: 1 }); return; }
     const li = lineas.indexOf(String(c.linea));
     const car = pts.map((q) => {
       const mask = juntas(q, li);
       let n = 0, pos = 0;
       for (let b = 0; b < lineas.length; b++) if (mask & (1 << b)) { if (b === li) pos = n; n++; }
-      // Con muchas líneas juntas se aprietan (se pisan un poco) para que el conjunto no se salga de la calzada:
-      // como mucho ocupa lo que tres líneas una al lado de otra.
-      return Math.round((pos - (n - 1) / 2) * (n > 3 ? 2 / (n - 1) : 1) * 1000) / 1000;
+      // Con más de 4 líneas juntas, las del MISMO color comparten franja (de todos modos no se distinguirían):
+      // así cada color se ve bien ancho en vez de quedar tapado por varias líneas iguales.
+      if (n > 4) {
+        const vistos = [];
+        for (let b = 0; b < lineas.length; b++) if (mask & (1 << b)) { if (!vistos.includes(colorDe[b])) vistos.push(colorDe[b]); }
+        n = vistos.length; pos = vistos.indexOf(colorDe[li]);
+      }
+      // Hasta 4 líneas van una al lado de otra con su grosor normal. Con más, el conjunto no crece (se saldría
+      // de la calzada): cada línea se hace más fina y se reparten el mismo hueco, así se ven TODAS como franjas
+      // de su color en vez de taparse unas a otras.
+      const paso = n > 4 ? 3 / (n - 1) : 1;                       // separación entre vecinas, en «carriles»
+      const ancho = n > 4 ? Math.max(0.3, (paso * 6 - 0.6) / 5) : 1;   // grosor respecto al normal
+      return Math.round((pos - (n - 1) / 2) * paso * 1000) / 1000 + '|' + Math.round(ancho * 100) / 100;
     });
     // Tramos seguidos con el mismo carril; los muy cortos (un cruce, un hueco) se funden con el de al lado
     let runs = [];
@@ -1286,7 +1301,7 @@ function tramosConCarril(caminos) {
     runs.forEach((r, n) => {
       const hasta = n + 1 < runs.length ? r.fin + 1 : r.fin;   // comparte un punto con el tramo siguiente (sin huecos)
       const t = pts.slice(r.ini, hasta + 1).map((q) => q.ll);
-      if (t.length > 1) salida.push({ i, pts: t, carril: r.carril });
+      if (t.length > 1) { const [ca, an] = String(r.carril).split('|').map(Number); salida.push({ i, pts: t, carril: ca, ancho: an }); }
     });
   });
   return salida;
@@ -1296,8 +1311,8 @@ function tramosConCarril(caminos) {
 function drawApproaching(bm, markers, buses) {
   const conPath = buses.filter((b) => b.path?.length > 1);
   // Cada camino va centrado sobre su calle; solo donde coinciden varias líneas se separan en paralelo.
-  const tramos = tramosConCarril(conPath.map((b) => ({ linea: String(b.linea ?? b.color), path: b.path })));
-  bm.source('bs-paths', fc(tramos.map((t) => lineF(t.pts, { color: safeColor(conPath[t.i].color, '#3d8bfd'), carril: t.carril }))));
+  const tramos = tramosConCarril(conPath.map((b) => ({ linea: String(b.linea ?? b.color), color: safeColor(b.color, '#3d8bfd'), path: b.path })));
+  bm.source('bs-paths', fc(tramos.map((t) => lineF(t.pts, { color: safeColor(conPath[t.i].color, '#3d8bfd'), carril: t.carril, ancho: t.ancho }))));
   markers.sync(buses);
 }
 
@@ -2216,6 +2231,14 @@ views.ajustes = (el) => {
 const searchEl = $('#q');
 const searchView = $('#view-buscar');
 let searchSeq = 0;
+/* Texto de cada parada ya preparado para buscar (sin tildes, en minúsculas). Se prepara una sola vez por
+   parada: antes se rehacía para las más de mil paradas con cada letra que escribías. */
+const textosBusqueda = new WeakMap();
+function textoBusqueda(p) {
+  let h = textosBusqueda.get(p);
+  if (h === undefined) { h = norm(`${p.nombre} ${p.direccion_completa || ''} ${p.calle || ''}`); textosBusqueda.set(p, h); }
+  return h;
+}
 async function runSearch() {
   const q = searchEl.value.trim();
   $('#q-clear').hidden = !q;
@@ -2229,7 +2252,7 @@ async function runSearch() {
     const isNum = /^\d+$/.test(q);
     let stops;
     if (isNum) stops = paradas.filter((p) => p.codigo.startsWith(q)).sort((a, b) => (a.codigo === q ? -1 : b.codigo === q ? 1 : a.codigo.length - b.codigo.length || a.codigo.localeCompare(b.codigo)));
-    else { const words = nq.split(/\s+/); stops = paradas.filter((p) => { const h = norm(`${p.nombre} ${p.direccion_completa || ''} ${p.calle || ''}`); return words.every((w) => h.includes(w)); }); }
+    else { const words = nq.split(/\s+/); stops = paradas.filter((p) => { const h = textoBusqueda(p); return words.every((w) => h.includes(w)); }); }
     const lines = lineas.filter((l) => norm(l.numero) === nq || norm(l.numero).startsWith(nq) || (!isNum && norm(l.nombre).includes(nq)));
     const linesHTML = lines.slice(0, 8).map((l) => `<a class="row" href="#linea-${esc(l.numero)}">${badge(l.numero, l.color)}<div class="row-main"><b>${esc(l.nombre)}</b><span>Línea</span></div>${ICON.chev}</a>`).join('');
     const stopsHTML = stops.slice(0, 40).map((p) => { const f = favs.get(p.codigo); return `<a class="row" href="#parada-${esc(p.codigo)}"><span class="stop-num">${esc(p.codigo)}</span><div class="row-main"><b>${f ? '★ ' : ''}${esc(f?.alias || p.nombre)}</b><span>${esc(f?.alias ? p.nombre : (p.direccion_completa || ''))}</span></div>${ICON.chev}</a>`; }).join('');
