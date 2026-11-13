@@ -1,0 +1,89 @@
+# Descarga las calles de OpenStreetMap de la zona por donde pasan las líneas y las guarda en la rama
+# «calles-osm» del repositorio. Sirve para ajustar el trazado de las líneas a la calzada (rotondas incluidas).
+# Se lanza solo al subir este archivo, o a mano: Actions → "Calles OSM" → Run workflow.
+name: Calles OSM
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths: [".github/workflows/calles.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  calles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Descargar las calles
+        run: |
+          cat > "$RUNNER_TEMP/calles.mjs" <<'FIN_SCRIPT'
+          import fs from 'node:fs';
+          import zlib from 'node:zlib';
+          const SALIDA = process.argv[2];
+          const SERVIDORES = (process.env.OVERPASS_URL || [
+            'https://overpass-api.de/api/interpreter',
+            'https://overpass.private.coffee/api/interpreter',
+            'https://overpass.kumi.systems/api/interpreter',
+            'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+          ].join(',')).split(',');
+          // Zona: la que ocupan los trazados oficiales, con 400 m de margen
+          const geo = JSON.parse(fs.readFileSync('geojson/lineas.json', 'utf8'));
+          let s = 90, n = -90, o = 180, e = -180;
+          const mira = (c) => { if (typeof c[0] === 'number') { if (c[1] < s) s = c[1]; if (c[1] > n) n = c[1]; if (c[0] < o) o = c[0]; if (c[0] > e) e = c[0]; } else c.forEach(mira); };
+          for (const f of geo.features || []) if (f.geometry) mira(f.geometry.coordinates);
+          const M = 0.004;
+          const bbox = [s - M, o - M * 1.25, n + M, e + M * 1.25].map((v) => v.toFixed(5)).join(',');
+          console.log(`Zona: ${bbox}`);
+          const TIPOS = 'motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|busway|pedestrian|road|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link';
+          const q = `[out:json][timeout:170][maxsize:1073741824];way["highway"~"^(${TIPOS})$"](${bbox});out geom qt;`;
+          const ETIQ = ['highway', 'oneway', 'junction', 'access', 'bus', 'psv', 'motor_vehicle', 'vehicle', 'service', 'oneway:bus', 'oneway:psv', 'busway', 'lanes:bus', 'lanes:psv', 'name', 'layer', 'bridge', 'tunnel', 'area'];
+          let ways = null;
+          for (let vuelta = 0; vuelta < 3 && !ways; vuelta++) for (const url of SERVIDORES) {
+            try {
+              const t0 = Date.now();
+              const r = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: q }), headers: { 'User-Agent': 'BusSev (app personal, no comercial)' }, signal: AbortSignal.timeout(240000) });
+              if (!r.ok) throw new Error(`HTTP ${r.status}`);
+              const j = await r.json();
+              if (!Array.isArray(j.elements) || j.elements.length < 1000) throw new Error(`respuesta rara (${j.elements?.length} elementos${j.remark ? `; ${j.remark}` : ''})`);
+              ways = j.elements.filter((w) => w.type === 'way' && Array.isArray(w.geometry) && w.geometry.length >= 2);
+              console.log(`${new URL(url).hostname}: ${ways.length} calles en ${Math.round((Date.now() - t0) / 1000)} s`);
+              break;
+            } catch (err) {
+              console.log(`${new URL(url).hostname}: ${err.message}; se prueba otro servidor`);
+              await new Promise((ok) => setTimeout(ok, 8000));
+            }
+          }
+          if (!ways) { console.log('::error::Ningún servidor de OpenStreetMap ha contestado. Vuelve a lanzar "Calles OSM" dentro de un rato.'); process.exit(1); }
+          // Formato compacto: por calle, sus etiquetas útiles, su id, los ids de sus nodos y las coordenadas (1e-7 grados, en diferencias)
+          const out = ways.map((w) => {
+            const t = {}; for (const k of ETIQ) if (w.tags && w.tags[k] != null) t[k] = w.tags[k];
+            const g = []; let pl = 0, pn = 0;
+            for (const p of w.geometry) { const L = Math.round(p.lat * 1e7), N = Math.round(p.lon * 1e7); g.push(L - pl, N - pn); pl = L; pn = N; }
+            return { i: w.id, t, n: w.nodes || [], g };
+          });
+          const gz = zlib.gzipSync(JSON.stringify({ fecha: new Date().toISOString(), bbox, ways: out }), { level: 9 });
+          fs.writeFileSync(SALIDA, gz);
+          console.log(`Guardado: ${out.length} calles, ${(gz.length / 1048576).toFixed(1)} MB`);
+          FIN_SCRIPT
+          node "$RUNNER_TEMP/calles.mjs" "$RUNNER_TEMP/calles.json.gz"
+
+      - name: Guardar en la rama calles-osm
+        run: |
+          mkdir "$RUNNER_TEMP/rama" && cd "$RUNNER_TEMP/rama"
+          git init -q -b calles-osm
+          cp "$RUNNER_TEMP/calles.json.gz" .
+          git config user.name "BusSev (automático)"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add calles.json.gz
+          git commit -q -m "Calles de OpenStreetMap (© colaboradores de OpenStreetMap, ODbL)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" calles-osm
+          echo "Calles guardadas en la rama calles-osm."
