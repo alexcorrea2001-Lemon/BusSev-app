@@ -474,14 +474,23 @@ const actualizaciones = {
       return { estado: hay ? 'nueva' : 'al-dia', nueva: pr ? `v${pr.join('.')}` : tag, mismoNombre, clave: `${tag}#${buildRemota}`, url, fecha: j.published_at || '' };
     } finally { clearTimeout(t); }
   },
-  /* Al abrir la app, como mucho una vez al día: si hay versión nueva, te avisa */
+  /* Al abrir la app y cada vez que vuelves a ella: si hay versión nueva, te avisa.
+     - Se consulta a GitHub como mucho cada 15 minutos, y solo cuenta si ha contestado (sin conexión, se
+       reintenta la próxima vez). Buscar a mano en Ajustes ya no retrasa este aviso.
+     - Si dices «Ahora no», te lo recuerda pasado medio día; si sale otra compilación más nueva, avisa enseguida. */
   async revisarSola() {
-    if (!settings.avisarVersion || !this.version().build) return;
-    if (Date.now() - store.get('ultimaRevisionVersion', 0) < 24 * 3600_000) return;
-    store.set('ultimaRevisionVersion', Date.now());
-    const r = await this.buscar().catch(() => null);
-    if (r?.estado === 'nueva' && store.get('versionAvisada', '') !== r.clave) {
-      store.set('versionAvisada', r.clave);
+    if (!settings.avisarVersion || !this.version().build || this.mirando) return;
+    if (document.querySelector('.modal-bg')) return;   // hay otra ventana abierta: no se pisa
+    if (Date.now() - store.get('ultimaRevisionAuto', 0) < 15 * 60_000) return;
+    this.mirando = true;
+    let r = null;
+    try { r = await this.buscar(); } catch { /* sin conexión: se reintenta al volver a la app */ } finally { this.mirando = false; }
+    if (!r || !['nueva', 'al-dia'].includes(r.estado)) return;
+    store.set('ultimaRevisionAuto', Date.now());
+    const av = store.get('versionAvisada', null);
+    const previa = av && typeof av === 'object' ? av : { clave: String(av || ''), t: 0 };
+    if (r.estado === 'nueva' && !(previa.clave === r.clave && Date.now() - previa.t < 12 * 3600_000) && !document.querySelector('.modal-bg')) {
+      store.set('versionAvisada', { clave: r.clave, t: Date.now() });
       // Pop-up de versión nueva (se puede desactivar aquí mismo o en Ajustes → «Avisarme si hay una versión nueva»)
       openModal(`<h2>✨ Hay una versión nueva</h2>
         <p class="help">${r.mismoNombre ? 'Hay una actualización de BusSev disponible.' : `BusSev ${esc(r.nueva)} ya está disponible.`} Se instala encima de la que tienes, sin perder tus favoritas ni tus tarjetas.</p>
@@ -495,7 +504,9 @@ const actualizaciones = {
     }
   },
 };
-setTimeout(() => actualizaciones.revisarSola(), 9000);
+setTimeout(() => actualizaciones.revisarSola(), 4000);
+// Android suele dejar la app abierta en segundo plano: se mira también al volver a ella, no solo al arrancarla
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => actualizaciones.revisarSola(), 1500); });
 
 /* Animación de carga: un autobús (o el vehículo de la fiesta) que avanza por una carretera */
 function cargandoHTML(texto = 'Cargando…', sub = '') {
@@ -2114,7 +2125,7 @@ views.ajustes = (el) => {
         <div id="s-ver-res"></div>
         <button class="btn block" type="button" id="s-ver">🔄 Buscar actualización</button>
         <p>Cada versión nueva lleva ya los horarios y recorridos oficiales más recientes (GitHub los descarga solo del Punto de Acceso Nacional de Transportes, y el día 1 de cada mes revisa si TUSSAM ha publicado otros). Se instala encima, sin perder nada.</p>
-        ${sw('avisarVersion', settings.avisarVersion, 'Avisarme si hay una versión nueva', 'Lo mira al abrir la app, como mucho una vez al día.')}
+        ${sw('avisarVersion', settings.avisarVersion, 'Avisarme si hay una versión nueva', 'Lo mira al abrir la app y cada vez que vuelves a ella.')}
       </div>
       <div class="set-group"><h3>Privacidad y seguridad</h3>
         <p>BusSev solo se conecta con TUSSAM (tiempos, saldo y avisos), con OpenFreeMap (mapa) y, si lo configuras, con tu propio servidor del saldo. No tiene anuncios ni seguimiento. Tus favoritas y tarjetas se guardan solo en este móvil.</p>
