@@ -1,0 +1,2 @@
+Última ejecución de "Calles OSM": 2026-11-13
+Las calles de OpenStreetMap están en la rama calles-osm (© colaboradores de OpenStreetMap, ODbL).
