@@ -378,11 +378,13 @@ if (!process.env.BUSSEV_SOLO_FUNCIONES) for (const [k, lista] of grupos) {
       // calles (OSRM, recta de respaldo). Así ninguna parada queda suelta.
       const rapido = !quedaTiempo(LIMITE_COMPLETO);
       const r = await montarOficial(m, stops.map((s) => [s.lat, s.lon]), rapido);
-      // Se "pega" el trazado a las calles de OpenStreetMap (para que quede encima de la carretera del mapa,
-      // no al lado). Con red de seguridad: si falla o saldría peor, se queda el oficial. Se puede apagar con
-      // SIN_PEGAR_OSM=1.
+      // "Pegado" del trazado a las calles de OpenStreetMap (map-matching de OSRM): APAGADO por defecto. El
+      // trazado oficial ya va sobre la calzada (las paradas de OSM quedan a ~5 m de él, de mediana); lo que se
+      // veía "al lado de la carretera" era el desplazamiento por carriles del mapa (arreglado en app.js). El
+      // pegado dependía de un servidor público y podía meter rodeos, así que solo se hace si se pide con
+      // PEGAR_OSM=1 (con su red de seguridad: si falla o saldría peor, se queda el oficial).
       let lineaPts = r.pts, pegada = false;
-      if (!process.env.SIN_PEGAR_OSM && !rapido && quedaTiempo(LIMITE_TOTAL)) {
+      if (process.env.PEGAR_OSM && !rapido && quedaTiempo(LIMITE_TOTAL)) {
         const pegado = await pegarAOSM(r.pts).catch(() => null);
         if (pegadoAceptable(r.pts, pegado)) { lineaPts = pegado; pegada = true; }
       }
