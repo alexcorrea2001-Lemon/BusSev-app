@@ -64,6 +64,7 @@ jobs:
             git config user.name "BusSev (automático)"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add www/data.js geojson/lineas.json
+            if [ -f www/novedades.json ]; then git add www/novedades.json; fi
             git commit -m "Datos y trazado oficial de TUSSAM actualizados"
             git push || echo "No se han podido guardar en el repositorio (no pasa nada: van igual en el APK)."
           fi
@@ -172,6 +173,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release delete "v$VERSION" --cleanup-tag --yes --repo "${{ github.repository }}" || echo "Es una versión nueva."
 
+      # Lo que ha cambiado en líneas, paradas y recorridos (www/novedades.json): va en la descripción de la
+      # versión, para que la app lo enseñe en el aviso de actualización antes de descargar.
+      - name: Novedades de los datos para la publicación
+        if: steps.seguir.outputs.si == 'si'
+        run: node scripts/novedades.mjs --publicar www/novedades.json || true
+
       - name: Publicar en Releases
         if: steps.seguir.outputs.si == 'si'
         uses: softprops/action-gh-release@v2
@@ -183,5 +190,8 @@ jobs:
             Descarga **BusSev.apk** desde el móvil y ábrelo para instalarlo (se instala encima, sin perder nada).
             ${{ steps.datos.outputs.cambio == 'si' && 'Incluye los horarios y recorridos oficiales más recientes de TUSSAM.' || '' }}
             Compilación ${{ env.NUMERO }}.
+
+            ${{ env.NOVEDADES_MD }}
             <!-- bussev-build:${{ env.NUMERO }} -->
+            <!-- bussev-novedades:${{ env.NOVEDADES_B64 }} -->
           files: BusSev.apk
