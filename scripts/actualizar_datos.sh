@@ -83,6 +83,10 @@ if (nuevo.generado < viejo.generado) { console.log(`El archivo descargado (${nue
 console.log(`Datos: válidos del ${nuevo.generado} al ${nuevo.caduca} · ${nuevo.paradas.length} paradas · ${nuevo.lineas.length} líneas (antes hasta ${viejo.caduca})`);
 ' "$TMP/data.js" www/data.js || exit 0
 
+# Qué cambia respecto a los datos que llevaba la app (líneas, paradas, recorridos, horarios): se apunta en
+# www/novedades.json para enseñarlo en la app al actualizar. Si no cambia nada, o si falla, no pasa nada.
+node scripts/novedades.mjs www/data.js "$TMP/data.js" www/novedades.json || true
+
 cp "$TMP/data.js" www/data.js
 # Geometría real del recorrido (shapes.txt): la deja lista para recorridos.mjs (archivo solo de build, no se sube)
 if [ -f "$TMP/data.js.shapes.json" ]; then

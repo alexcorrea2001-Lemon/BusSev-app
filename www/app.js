@@ -18,7 +18,7 @@ const DEFAULTS = {
   revisarCada: 3, avisosTussam: 'mias', saldoURL: '', tiemposServidor: false, fondo: '', vehiculosFiesta: false, avisarVersion: true,
 };
 const settings = { ...DEFAULTS, ...store.get('settings', {}) };
-if (!['oscuro', 'claro', 'tema'].includes(settings.mapStyle)) settings.mapStyle = 'oscuro';
+if (!['oscuro', 'claro', 'tema', 'satelite'].includes(settings.mapStyle)) settings.mapStyle = 'oscuro';
 const saveSettings = () => store.set('settings', settings);
 
 // [acento, acento suave, texto sobre acento] para tema claro y oscuro
@@ -248,7 +248,10 @@ const SEVILLA = [37.3891, -5.9845];
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const norm = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-const safeColor = (c, d = '#d41c2b') => (/^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(String(c || '')) ? c : d);
+/* El azul marino de TUSSAM (líneas 10 a 52, entre otras) es tan oscuro que casi no se distingue del fondo
+   oscuro ni en el mapa: en toda la app se pinta con un azul algo más claro. Todo color de línea pasa por aquí. */
+const AZUL_LINEAS = '#1c38a8';
+const safeColor = (c, d = '#d41c2b') => (/^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(String(c || '')) ? (/^#000d6f$/i.test(c) ? AZUL_LINEAS : c) : d);
 function fmtDist(m) {
   if (m == null || Number.isNaN(m)) return '';
   if (m < 1000) return `${Math.max(10, Math.round(m / 10) * 10)} m`;
@@ -445,6 +448,100 @@ function filtrarLineas(tiempos, fav) {
 /* Piezas de interfaz                                                  */
 /* ================================================================== */
 /* ---------- Actualizaciones de la app (las publica GitHub en «Releases») ---------- */
+/* Novedades de los datos de TUSSAM (líneas, paradas, recorridos y horarios que han cambiado). Las calcula
+   GitHub al compilar (scripts/novedades.mjs) y llegan por dos sitios: dentro de la app (/novedades.json) y,
+   escondidas, en la descripción de la versión publicada (para enseñarlas ANTES de actualizar). */
+const novedades = {
+  valida(n) { return n && typeof n === 'object' && Array.isArray(n.grupos) && n.grupos.length ? n : null; },
+  deTexto(body) {
+    try {
+      const b64 = String(body || '').match(/bussev-novedades:([A-Za-z0-9+/=]+)/)?.[1];
+      if (!b64) return null;
+      const bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return this.valida(JSON.parse(new TextDecoder('utf-8').decode(bytes)));
+    } catch { return null; }
+  },
+  /* Solo las que aún no has visto */
+  pendientes(n) { n = this.valida(n); return n && String(n.id) !== String(store.get('novedadesVistas', '')) ? n : null; },
+  html(n) {
+    return `<div class="nov">${n.grupos.slice(0, 12).map((g) => `<h4>${esc(g.t)}</h4><ul>${(g.i || []).slice(0, 14).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`).join('')}</div>`;
+  },
+  /* Al abrir la app recién actualizada: enseña una vez lo que ha cambiado en esta versión */
+  async alArrancar() {
+    const build = Number(window.BUSSEV_VERSION?.build) || 0;
+    if (!build) return;
+    const antes = store.get('buildVisto', 0);
+    let n = null;
+    try { const r = await fetch('/novedades.json', { cache: 'no-store' }); if (r.ok) n = this.valida(await r.json()); } catch { /* esta versión no trae novedades */ }
+    if (!antes) {   // primera vez que se abre la app: no hay nada «nuevo» que contar
+      store.set('buildVisto', build); if (n) store.set('novedadesVistas', String(n.id)); return;
+    }
+    if (antes === build) return;
+    store.set('buildVisto', build);
+    const pend = this.pendientes(n);
+    if (!pend) return;
+    store.set('novedadesVistas', String(pend.id));
+    for (let i = 0; i < 20 && document.querySelector('.modal-bg'); i++) await new Promise((ok) => setTimeout(ok, 500));
+    openModal(`<h2>🚌 Novedades de esta versión</h2>
+      <p class="help">BusSev se ha actualizado con los datos nuevos de TUSSAM. Esto es lo que cambia:</p>
+      <div class="nov-caja">${this.html(pend)}</div>
+      <div class="actions"><button class="btn" type="button" id="nov-ok">Entendido</button></div>`, (m, close) => { $('#nov-ok', m).onclick = close; });
+  },
+};
+
+/* Actualizar SIN salir de la app: descarga el APK dentro de BusSev (con su barra de progreso), abre el
+   instalador de Android y, al volver a abrir la app, borra lo descargado. Si el móvil no lo permite (o es la
+   versión web), se hace como antes: se abre la descarga en el navegador. */
+const actualizador = {
+  nativo(metodo, datos = {}) { return window.Capacitor.nativePromise('Actualizador', metodo, datos); },
+  /* Borra descargas antiguas (se llama al abrir la app: ahí ya está instalada la versión nueva) */
+  limpiar() { if (isNative()) { try { this.nativo('limpiar').catch(() => null); } catch { /* versión sin este componente */ } } },
+};
+async function instalarActualizacion(url) {
+  if (!isNative()) { descargarApp(url); return; }
+  let cerrado = false, cerrar = () => {};
+  openModal(`<h2>Actualizando BusSev</h2>
+    <p class="help" id="upd-txt">Descargando la versión nueva…</p>
+    <div class="upd-barra" role="progressbar" aria-valuemin="0" aria-valuemax="100"><i id="upd-prog"></i></div>
+    <div class="actions"><button class="btn ghost" type="button" id="upd-cancel">Cancelar</button><button class="btn" type="button" id="upd-inst" hidden>Instalar</button></div>`, (m, close) => {
+    cerrar = () => { cerrado = true; close(); };
+    $('#upd-cancel', m).onclick = () => { cerrar(); actualizador.limpiar(); };
+  });
+  const txt = (t) => { const e = document.getElementById('upd-txt'); if (e) e.textContent = t; };
+  const barra = (pc) => { const e = document.getElementById('upd-prog'); if (e) { e.style.width = `${pc}%`; e.parentElement.setAttribute('aria-valuenow', String(Math.round(pc))); } };
+  const instalar = async () => {
+    const r = await actualizador.nativo('instalar');
+    const b = document.getElementById('upd-inst');
+    if (r && r.permiso === false) {
+      txt('Android pide tu permiso: activa «Permitir de esta fuente» para BusSev, vuelve atrás y pulsa Instalar.');
+      if (b) { b.hidden = false; b.onclick = () => instalar().catch((e) => txt(e.message || 'No se ha podido abrir el instalador.')); }
+    } else {
+      txt('Se ha abierto el instalador de Android. Pulsa «Actualizar» y, al terminar, abre BusSev: lo descargado se borra solo.');
+      if (b) { b.hidden = false; b.textContent = 'Instalar otra vez'; b.onclick = () => instalar().catch(() => null); }
+    }
+  };
+  try {
+    await actualizador.nativo('descargar', { url });
+    for (;;) {
+      await new Promise((ok) => setTimeout(ok, 350));
+      if (cerrado || !document.getElementById('upd-prog')) { actualizador.limpiar(); return; }   // cancelado o ventana cerrada
+      const e = await actualizador.nativo('estado');
+      if (e.error) throw new Error(e.error);
+      if (e.total > 0) { barra(Math.min(100, (e.bajado / e.total) * 100)); txt(`Descargando la versión nueva… ${Math.round((e.bajado / e.total) * 100)} % (${(e.bajado / 1048576).toFixed(1)} de ${(e.total / 1048576).toFixed(1)} MB)`); }
+      else if (e.bajado > 0) txt(`Descargando la versión nueva… ${(e.bajado / 1048576).toFixed(1)} MB`);
+      if (e.hecho) break;
+    }
+    barra(100);
+    await instalar();
+  } catch (e) {
+    // Sin el componente de instalación (versión antigua) o si falla la descarga: como antes, por el navegador
+    cerrar();
+    toast(`${e?.message && !/not implemented|UNIMPLEMENTED|no implement/i.test(e.message) ? e.message + '. ' : ''}Se abre la descarga en el navegador.`);
+    descargarApp(url);
+  }
+}
+
 const actualizaciones = {
   version: () => window.BUSSEV_VERSION || { build: 0, fecha: '', repo: '' },
   paginaVersiones() { const r = this.version().repo; return r ? `https://github.com/${r}/releases/latest` : ''; },
@@ -477,7 +574,7 @@ const actualizaciones = {
       const apk = (j.assets || []).find((a) => /\.apk$/i.test(a.name || ''))?.browser_download_url;
       const url = this.enlaceSeguro(apk || j.html_url || '') || this.paginaVersiones();
       store.set('ultimaRevisionVersion', Date.now());
-      return { estado: hay ? 'nueva' : 'al-dia', nueva: pr ? `v${pr.join('.')}` : tag, mismoNombre, clave: `${tag}#${buildRemota}`, url, fecha: j.published_at || '' };
+      return { estado: hay ? 'nueva' : 'al-dia', nueva: pr ? `v${pr.join('.')}` : tag, mismoNombre, clave: `${tag}#${buildRemota}`, url, fecha: j.published_at || '', novedades: novedades.deTexto(j.body) };
     } finally { clearTimeout(t); }
   },
   /* Al abrir la app y cada vez que vuelves a ella: si hay versión nueva, te avisa.
@@ -498,12 +595,14 @@ const actualizaciones = {
     if (r.estado === 'nueva' && !(previa.clave === r.clave && Date.now() - previa.t < 12 * 3600_000) && !document.querySelector('.modal-bg')) {
       store.set('versionAvisada', { clave: r.clave, t: Date.now() });
       // Pop-up de versión nueva (se puede desactivar aquí mismo o en Ajustes → «Avisarme si hay una versión nueva»)
+      const nov = novedades.pendientes(r.novedades);
       openModal(`<h2>✨ Hay una versión nueva</h2>
         <p class="help">${r.mismoNombre ? 'Hay una actualización de BusSev disponible.' : `BusSev ${esc(r.nueva)} ya está disponible.`} Se instala encima de la que tienes, sin perder tus favoritas ni tus tarjetas.</p>
-        <div class="actions"><button class="btn ghost" type="button" id="upd-no">Ahora no</button>${r.url ? '<button class="btn" type="button" id="upd-ok">Descargar</button>' : '<a class="btn" href="#ajustes" id="upd-aj">Ver en Ajustes</a>'}</div>
+        ${nov ? `<div class="nov-caja"><b>Qué cambia en las líneas y paradas</b>${novedades.html(nov)}</div>` : ''}
+        <div class="actions"><button class="btn ghost" type="button" id="upd-no">Ahora no</button>${r.url ? '<button class="btn" type="button" id="upd-ok">Descargar e instalar</button>' : '<a class="btn" href="#ajustes" id="upd-aj">Ver en Ajustes</a>'}</div>
         <button class="link-btn" type="button" id="upd-never" style="margin:6px auto 0;display:block">No volver a avisarme de versiones</button>`, (m, close) => {
         $('#upd-no', m).onclick = close;
-        $('#upd-ok', m)?.addEventListener('click', () => { openWeb(r.url); close(); });
+        $('#upd-ok', m)?.addEventListener('click', () => { close(); instalarActualizacion(r.url); });
         $('#upd-aj', m)?.addEventListener('click', close);
         $('#upd-never', m).onclick = () => { settings.avisarVersion = false; saveSettings(); close(); toast('No te avisaré de versiones. Puedes reactivarlo en Ajustes.'); };
       });
@@ -511,6 +610,7 @@ const actualizaciones = {
   },
 };
 setTimeout(() => actualizaciones.revisarSola(), 4000);
+setTimeout(() => { actualizador.limpiar(); novedades.alArrancar().catch(() => null); }, 2500);
 // Android suele dejar la app abierta en segundo plano: se mira también al volver a ella, no solo al arrancarla
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => actualizaciones.revisarSola(), 1500); });
 
@@ -803,8 +903,11 @@ function geoErrorText(err) {
 /* Mapas (MapLibre + OpenFreeMap, sin clave)                           */
 /* ================================================================== */
 if (window.maplibregl) window.maplibregl.setWorkerUrl('/vendor/maplibre/maplibre-gl-csp-worker.js');
-const mapIsDark = () => settings.mapStyle === 'oscuro' || (settings.mapStyle === 'tema' && resolvedTheme === 'dark');
-const styleUrl = () => (mapIsDark() ? '/map/oscuro.json' : '/map/claro.json');
+// Satélite: fotos aéreas oficiales (PNOA, Instituto Geográfico Nacional) con los nombres de las calles encima.
+// Cuenta como mapa oscuro para los bordes de las líneas y demás.
+const mapIsDark = () => settings.mapStyle === 'oscuro' || settings.mapStyle === 'satelite' || (settings.mapStyle === 'tema' && resolvedTheme === 'dark');
+const styleUrl = () => (settings.mapStyle === 'satelite' ? '/map/satelite.json' : mapIsDark() ? '/map/oscuro.json' : '/map/claro.json');
+const creditoMapa = () => (settings.mapStyle === 'satelite' ? 'PNOA © Instituto Geográfico Nacional · © OpenStreetMap' : '© OpenStreetMap');
 const liveMaps = new Set();
 function updateMapStyles() { for (const bm of liveMaps) bm.setStyle(); }
 const ll = ([lat, lon]) => [lon, lat];
@@ -827,13 +930,16 @@ function createMap(el, center, zoom) {
   }
   m.touchZoomRotate.enableRotation();   // girar el mapa con dos dedos
   m.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), 'top-right');   // brújula: tócala para volver a poner el norte arriba
-  el.insertAdjacentHTML('beforeend', '<span class="osm-credito">© OpenStreetMap</span>');
+  el.insertAdjacentHTML('beforeend', `<span class="osm-credito${settings.mapStyle === 'satelite' ? ' sat' : ''}">${creditoMapa()}</span>`);
   const data = new Map();        // id -> geojson
   const installers = [];
   const bm = {
     m, style: styleUrl(),
     ready: new Promise((r) => m.once('style.load', r)),
-    setStyle() { const u = styleUrl(); if (u !== bm.style) { bm.style = u; estiloListo = false; m.setStyle(u, { diff: false }); } },
+    setStyle() {
+      const u = styleUrl(); if (u !== bm.style) { bm.style = u; estiloListo = false; m.setStyle(u, { diff: false }); }
+      const cr = el.querySelector('.osm-credito'); if (cr) { cr.textContent = creditoMapa(); cr.classList.toggle('sat', settings.mapStyle === 'satelite'); }
+    },
     source(id, geojson) {
       data.set(id, geojson);
       const s = m.getSource(id);
@@ -1331,8 +1437,9 @@ let routeCount = 0;
 const goBack = () => { if (routeCount > 1) history.back(); else location.hash = lastTab; };
 const spin = (on) => $('#btn-refresh').classList.toggle('spinning', !!on);
 
-/* Autobuses nocturnos (Búho): de noche se enseñan en Favoritas con su última hora */
-function esHoraNoche() { const h = new Date().getHours(); return h >= 22 || h < 6; }
+/* Autobuses nocturnos (Búho): se enseñan en Favoritas desde las 23:50 (poco antes de que empiecen a salir)
+   hasta las 6 de la mañana, con su última hora */
+function esHoraNoche(d = new Date()) { const h = d.getHours(); return h < 6 || (h === 23 && d.getMinutes() >= 50); }
 function lineasNocturnas() {
   return [...cache.lineaByNum.values()]
     .filter((l) => l.nocturna || /^A\d/.test(String(l.numero || '')))
@@ -2114,7 +2221,7 @@ views.ajustes = (el) => {
           ${Object.entries(FONDOS).map(([k, f]) => `<button type="button" class="fondo" data-fondo="${k}" aria-pressed="${settings.fondo === k}"><span style="background:${f.bg};border-color:${f.line}"><i style="background:${f.surface}"></i></span><small>${esc(f.label)}</small></button>`).join('')}
         </div>
         <p>Los cuatro primeros son claros y el resto oscuros: al elegir uno, el tema cambia solo a claro u oscuro.</p></div>
-      <div class="set-group"><h3>Mapa</h3>${segBtns('mapStyle', [['oscuro', 'Oscuro'], ['claro', 'Claro'], ['tema', 'Como el tema']], settings.mapStyle)}
+      <div class="set-group"><h3>Mapa</h3>${segBtns('mapStyle', [['oscuro', 'Oscuro'], ['claro', 'Claro'], ['tema', 'Como el tema'], ['satelite', 'Satélite']], settings.mapStyle)}
         <h3 style="margin-top:14px">Qué ver en el mapa</h3>
         ${sw('mapaParadas', settings.mapaParadas !== false, 'Paradas', 'Los puntos de las paradas.')}
         ${sw('mapaRecorridos', settings.mapaRecorridos !== false, 'Recorridos', 'La línea del autobús cuando eliges una.')}
@@ -2199,8 +2306,8 @@ views.ajustes = (el) => {
       try {
         const r = await actualizaciones.buscar();
         if (r.estado === 'nueva') {
-          box.innerHTML = `<div class="ver-res nueva"><b>✨ ${r.mismoNombre ? `Hay una actualización de la ${esc(r.nueva)}` : `Hay una versión nueva: la ${esc(r.nueva)}`}</b><span>Descárgala e instálala encima de esta.</span><button class="btn" type="button" id="s-ver-bajar">Descargar</button></div>`;
-          $('#s-ver-bajar', el).onclick = () => descargarApp(r.url);
+          box.innerHTML = `<div class="ver-res nueva"><b>✨ ${r.mismoNombre ? `Hay una actualización de la ${esc(r.nueva)}` : `Hay una versión nueva: la ${esc(r.nueva)}`}</b><span>Se descarga e instala desde aquí mismo, encima de esta, sin perder nada.</span>${novedades.pendientes(r.novedades) ? `<div class="nov-caja"><b>Qué cambia en las líneas y paradas</b>${novedades.html(r.novedades)}</div>` : ''}<button class="btn" type="button" id="s-ver-bajar">Descargar e instalar</button></div>`;
+          $('#s-ver-bajar', el).onclick = () => instalarActualizacion(r.url);
         } else if (r.estado === 'al-dia') {
           box.innerHTML = '<div class="ver-res"><b>✅ Tienes la última versión</b></div>';
         } else {

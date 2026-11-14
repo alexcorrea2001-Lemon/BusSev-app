@@ -81,4 +81,8 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Actualizar BusSev desde dentro de la app: permite abrir el instalador de Android con la versión nueva
+         descargada de GitHub (Android te pide igualmente que lo autorices la primera vez). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>

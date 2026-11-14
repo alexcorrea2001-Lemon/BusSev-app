@@ -556,7 +556,7 @@ details.set-group[open] > summary::after { transform: rotate(-90deg); }
 .av-tabla th { background: var(--surface-2); }
 .modal-grip { display: block; width: calc(100% + 32px); margin: -10px -16px -6px; border: 0; background: none; padding: 10px 0 14px; cursor: pointer; touch-action: none; }
 .modal-grip .sheet-grip { width: 44px; height: 5px; margin: 0 auto; }
-.av-boton { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 14px; color: inherit; text-decoration: none; border-left: 4px solid var(--ok); }
+.av-boton { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 14px; color: inherit; text-decoration: none; border-left: 4px solid var(--line); }
 .av-boton.hay { border-left-color: var(--warn); }
 .av-boton .av-txt { display: grid; gap: 1px; }
 .av-boton small { color: var(--muted); font-size: 13px; }
@@ -898,3 +898,20 @@ html.repinta body { transform: translateZ(0); }
 .btn-upd.buscando .ico-upd { animation: upd-gira .9s linear infinite; }
 .btn-upd:disabled { opacity: .8; }
 @keyframes upd-gira { to { transform: rotate(360deg); } }
+
+/* Avisos de TUSSAM que no tocan a tus líneas: megáfono en un redondel discreto (no un ✅ verde) */
+.av-ico-info { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); flex: none; }
+.av-ico-info svg { width: 20px; height: 20px; }
+/* Crédito del mapa satélite: sobre foto, siempre en blanco con sombra */
+.osm-credito.sat, :root[data-theme="light"] .osm-credito.sat { color: rgb(255 255 255 / .85); text-shadow: 0 0 3px rgb(0 0 0 / .95); }
+
+/* Novedades de datos (líneas, paradas y recorridos que cambian) en el aviso de versión */
+.nov-caja { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin: 10px 0 4px; max-height: 42vh; overflow: auto; font-size: 14px; }
+.nov-caja > b { display: block; margin-bottom: 4px; }
+.nov h4 { margin: 10px 0 2px; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--accent); }
+.nov h4:first-child { margin-top: 2px; }
+.nov ul { margin: 0; padding-left: 18px; }
+.nov li { margin: 2px 0; }
+/* Barra de progreso de la descarga de la actualización */
+.upd-barra { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 12px 0 4px; }
+.upd-barra i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width .3s ease; }

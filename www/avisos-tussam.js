@@ -265,7 +265,10 @@ window.avisosTussam = (() => {
     const enMias = d.lista.filter((a) => meAfecta(a, mias)).length;
     const nuevos = d.lista.filter((a) => !vistos.has(a.id)).length;
     const det = [enMias ? `${enMias} en tus líneas` : 'ninguno en tus líneas', nuevos ? `${nuevos} nuevo${nuevos > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
-    return `<a class="av-boton${enMias ? ' hay' : ''}" href="#avisos"><span class="av-ico">${enMias ? '⚠️' : '✅'}</span><span class="av-txt"><b>Ver avisos de TUSSAM (${d.lista.length})</b><small>${det}</small></span>${nuevos ? '<i class="av-punto"></i>' : ''}${ICON.chev}</a>`;
+    // Si hay avisos pero ninguno toca a tus líneas: un megáfono discreto (antes salía un ✅ verde, que parecía
+    // decir «todo bien» cuando en realidad sí hay avisos para leer).
+    const ICO_AVISOS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.2v3.6c0 .6.4 1 1 1h2.2l6.2 3.6c.7.4 1.6-.1 1.6-.9V6.500c0-.8-.9-1.300-1.600-.900L7.200 9.200H5c-.6 0-1 .4-1 1Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M18.200 9.300a4.200 4.200 0 0 1 0 5.400M7.400 15v3.200c0 .7.600 1.300 1.300 1.300h.5c.7 0 1.300-.6 1.300-1.300v-1.400" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return `<a class="av-boton${enMias ? ' hay' : ''}" href="#avisos"><span class="av-ico${enMias ? '' : ' av-ico-info'}">${enMias ? '⚠️' : ICO_AVISOS}</span><span class="av-txt"><b>Ver avisos de TUSSAM (${d.lista.length})</b><small>${det}</small></span>${nuevos ? '<i class="av-punto"></i>' : ''}${ICON.chev}</a>`;
   }
 
   document.addEventListener('click', (e) => {

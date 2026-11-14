@@ -19,6 +19,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(TarjetaNfcPlugin.class);
         registerPlugin(TussamWebPlugin.class);
         registerPlugin(BusSevWidgetPlugin.class);
+        registerPlugin(ActualizadorPlugin.class);
         super.onCreate(savedInstanceState);
         handleIntent(getIntent());
 
